@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import type { ProcessMapProject, ProcessMap, JourneyNodeData, JourneyNodeType } from '../types';
 import type { Node, Edge } from '@xyflow/react';
+import { layoutWithDagre } from './layoutEngine';
 
 export interface ParsedStep {
   id: string;
@@ -19,7 +20,14 @@ const NODE_COLORS: Record<JourneyNodeType, string> = {
   subprocess: '#64748b',
 };
 
-const ASCII_ART = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬▼▲►◄●○■□▪▫◆◇★☆✓✗→←↑↓⇒⇐⇑⇓]/g;
+const CATEGORY_COLORS = [
+  '#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4',
+  '#84cc16', '#e11d48', '#7c3aed', '#059669',
+];
+
+const ASCII_ART = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬▼▲►◄●○■□▪▫◆◇★☆✓✗←↑↓⇒⇐⇑⇓]/g;
+const ARROW_CHAR = /→/g;
 const SEPARATOR_LINE = /^[\s─═\-_~*#]{4,}$/;
 const BOX_LINE = /^[\s]*[┌┐└┘├┤│║╔╗╚╝╠╣].*/;
 
@@ -28,39 +36,28 @@ function stripAsciiArt(text: string): string {
     .split('\n')
     .filter((line) => !SEPARATOR_LINE.test(line))
     .filter((line) => !BOX_LINE.test(line))
-    .map((line) => line.replace(ASCII_ART, ' ').replace(/\s{2,}/g, ' ').trim())
+    .map((line) => line.replace(ASCII_ART, ' ').replace(ARROW_CHAR, ' -> ').replace(/\s{2,}/g, ' ').trim())
     .filter((line) => line.length > 0)
     .join('\n');
 }
 
 const EXPLICIT_TAGS: Record<string, JourneyNodeType> = {
-  'start': 'start',
-  'begin': 'start',
-  'end': 'end',
-  'finish': 'end',
-  'resolve': 'end',
-  'action': 'action',
-  'step': 'action',
-  'touchpoint': 'action',
-  'touch point': 'action',
-  'decision': 'decision',
-  'check': 'decision',
-  'subprocess': 'subprocess',
-  'sub-process': 'subprocess',
-  'sub process': 'subprocess',
-  'phase': 'subprocess',
-  'stage': 'subprocess',
-  'category': 'subprocess',
-  'pain point': 'action',
-  'pain': 'action',
-  'opportunity': 'action',
-  'emotion': 'action',
+  'start': 'start', 'begin': 'start',
+  'end': 'end', 'finish': 'end', 'resolve': 'end',
+  'action': 'action', 'step': 'action', 'touchpoint': 'action',
+  'touch point': 'action', 'pain point': 'action', 'pain': 'action',
+  'opportunity': 'action', 'emotion': 'action',
+  'decision': 'decision', 'check': 'decision',
+  'subprocess': 'subprocess', 'sub-process': 'subprocess',
+  'sub process': 'subprocess', 'phase': 'subprocess',
+  'stage': 'subprocess', 'category': 'subprocess',
 };
 
 function detectNodeType(text: string, hasChildren: boolean): JourneyNodeType {
   if (hasChildren) return 'subprocess';
   const lower = text.toLowerCase();
-  if (lower.includes('?') || lower.startsWith('should') || lower.startsWith('does') || lower.startsWith('will') || lower.startsWith('can') || lower.startsWith('is ')) {
+  if (lower.includes('?') || lower.startsWith('should') || lower.startsWith('does') ||
+      lower.startsWith('will') || lower.startsWith('can') || lower.startsWith('is ')) {
     return 'decision';
   }
   return 'action';
@@ -113,8 +110,8 @@ function detectSections(text: string): string {
 
     const isAllCaps = trimmed === trimmed.toUpperCase() && trimmed.length > 3 && /[A-Z]/.test(trimmed);
     const nextLine = lines[i + 1]?.trim() ?? '';
-    const nextIsIndented = nextLine.startsWith('-') || nextLine.startsWith('  ') || nextLine.match(/^\d+[.)]/);
-    const isSectionHeader = isAllCaps || (trimmed.match(/^#{1,3}\s/) !== null);
+    const nextIsIndented = nextLine.startsWith('-') || nextLine.startsWith('  ') || !!nextLine.match(/^\d+[.)]/);
+    const isSectionHeader = isAllCaps || (!!trimmed.match(/^#{1,3}\s/));
 
     if (isSectionHeader || (!line.startsWith(' ') && !line.startsWith('-') && nextIsIndented && !line.match(/^\d+[.)]/))) {
       sectionIdx++;
@@ -184,7 +181,7 @@ export function parseTextToSteps(text: string): ParsedStep[] {
   return steps;
 }
 
-function makeEdge(sourceId: string, targetId: string, label?: string): Edge {
+function makeEdge(sourceId: string, targetId: string, label?: string, sourceHandle?: string): Edge {
   return {
     id: `e-${sourceId}-${targetId}`,
     source: sourceId,
@@ -194,76 +191,56 @@ function makeEdge(sourceId: string, targetId: string, label?: string): Edge {
     animated: true,
     style: { stroke: '#94a3b8', strokeWidth: 2 },
     ...(label ? { labelStyle: { fontSize: 11, fontWeight: 600 } } : {}),
+    ...(sourceHandle ? { sourceHandle } : {}),
   };
 }
 
-function gridPosition(index: number, columns: number, w: number, h: number): { x: number; y: number } {
-  const col = index % columns;
-  const row = Math.floor(index / columns);
-  return { x: col * (w + 40), y: row * (h + 40) };
-}
-
-function layoutAsFlow(
+function buildFlowMap(
   steps: ParsedStep[],
 ): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
-  const nodes: Node<JourneyNodeData>[] = [];
-  const edges: Edge[] = [];
-  const xGap = 260;
-  const yBranch = 140;
+  const rawNodes: Node<JourneyNodeData>[] = [];
+  const rawEdges: Edge[] = [];
 
   const startId = nanoid();
-  nodes.push({
-    id: startId,
-    type: 'journeyNode',
-    position: { x: 0, y: 0 },
+  rawNodes.push({
+    id: startId, type: 'journeyNode', position: { x: 0, y: 0 },
     data: { label: 'Start', description: '', nodeType: 'start', color: NODE_COLORS.start },
   });
 
   let prevId = startId;
-  let xPos = xGap;
 
   steps.forEach((step) => {
     const nodeId = nanoid();
-    const isDecision = step.nodeType === 'decision';
-
-    nodes.push({
-      id: nodeId,
-      type: 'journeyNode',
-      position: { x: xPos, y: 0 },
+    rawNodes.push({
+      id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
       data: {
-        label: step.label,
-        description: step.description,
-        nodeType: step.nodeType,
-        color: NODE_COLORS[step.nodeType],
+        label: step.label, description: step.description,
+        nodeType: step.nodeType, color: NODE_COLORS[step.nodeType],
       },
     });
-    edges.push(makeEdge(prevId, nodeId));
+    rawEdges.push(makeEdge(prevId, nodeId));
 
-    if (isDecision && step.description) {
-      const yesId = nanoid();
-      nodes.push({
-        id: yesId,
-        type: 'journeyNode',
-        position: { x: xPos, y: yBranch },
-        data: { label: step.description, description: '', nodeType: 'action', color: NODE_COLORS.action },
+    if (step.nodeType === 'decision') {
+      const branchId = nanoid();
+      const branchLabel = step.description ? step.description.slice(0, 40) : 'Alt path';
+      rawNodes.push({
+        id: branchId, type: 'journeyNode', position: { x: 0, y: 0 },
+        data: { label: branchLabel, description: '', nodeType: 'action', color: NODE_COLORS.action },
       });
-      edges.push({ ...makeEdge(nodeId, yesId, 'Yes'), sourceHandle: 'bottom' });
+      rawEdges.push(makeEdge(nodeId, branchId, 'No', 'bottom'));
     }
 
     prevId = nodeId;
-    xPos += xGap;
   });
 
   const endId = nanoid();
-  nodes.push({
-    id: endId,
-    type: 'journeyNode',
-    position: { x: xPos, y: 0 },
+  rawNodes.push({
+    id: endId, type: 'journeyNode', position: { x: 0, y: 0 },
     data: { label: 'End', description: '', nodeType: 'end', color: NODE_COLORS.end },
   });
-  edges.push(makeEdge(prevId, endId));
+  rawEdges.push(makeEdge(prevId, endId));
 
-  return { nodes, edges };
+  return layoutWithDagre(rawNodes, rawEdges, 'LR');
 }
 
 export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft: boolean): ProcessMapProject {
@@ -274,17 +251,18 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
   const topLevel = steps.filter((s) => s.indent === 0);
   const phases = topLevel.length > 0 ? topLevel : steps;
 
-  const phaseNodes: Node<JourneyNodeData>[] = [];
-  const columns = Math.min(Math.ceil(Math.sqrt(phases.length)), 4);
+  const rawOverviewNodes: Node<JourneyNodeData>[] = [];
+  const overviewEdges: Edge[] = [];
 
   phases.forEach((phase, i) => {
     const nodeId = nanoid();
     const hasChildren = phase.children.length > 0;
+    const categoryColor = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
 
     let subMapId: string | undefined;
     if (hasChildren) {
       subMapId = nanoid();
-      const { nodes: subNodes, edges: subEdges } = layoutAsFlow(phase.children);
+      const { nodes: subNodes, edges: subEdges } = buildFlowMap(phase.children);
       maps[subMapId] = {
         id: subMapId,
         name: phase.label,
@@ -301,21 +279,19 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
       ? `${phase.description}${hasChildren ? ` (${childCount} steps)` : ''}`
       : hasChildren ? `${childCount} steps` : '';
 
-    const pos = gridPosition(i, columns, 240, 120);
-
-    phaseNodes.push({
-      id: nodeId,
-      type: 'journeyNode',
-      position: pos,
+    rawOverviewNodes.push({
+      id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
       data: {
         label: phase.label,
         description: desc,
         nodeType: hasChildren ? 'subprocess' : phase.nodeType,
-        color: hasChildren ? NODE_COLORS.subprocess : NODE_COLORS[phase.nodeType],
+        color: hasChildren ? categoryColor : NODE_COLORS[phase.nodeType],
         subMapId,
       },
     });
   });
+
+  const { nodes: overviewNodes } = layoutWithDagre(rawOverviewNodes, overviewEdges, 'TB');
 
   maps[rootMapId] = {
     id: rootMapId,
@@ -323,8 +299,8 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
     description: 'Top-level categories',
     parentMapId: null,
     parentNodeId: null,
-    nodes: phaseNodes,
-    edges: [],
+    nodes: overviewNodes,
+    edges: overviewEdges,
   };
 
   return {
