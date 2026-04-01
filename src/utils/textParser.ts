@@ -169,6 +169,7 @@ function gridPosition(index: number, columns: number, nodeWidth: number, nodeHei
 
 function layoutChildSteps(
   steps: ParsedStep[],
+  isLeafLevel: boolean,
 ): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
   const nodes: Node<JourneyNodeData>[] = [];
   const edges: Edge[] = [];
@@ -189,7 +190,7 @@ function layoutChildSteps(
       },
     });
 
-    if (i > 0) {
+    if (isLeafLevel && i > 0) {
       edges.push(makeEdge(nodes[i - 1].id, id));
     }
   });
@@ -216,7 +217,8 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
     let subMapId: string | undefined;
     if (hasChildren) {
       subMapId = nanoid();
-      const { nodes: subNodes, edges: subEdges } = layoutChildSteps(phase.children);
+      const anyChildHasChildren = phase.children.some((c) => c.children.length > 0);
+      const { nodes: subNodes, edges: subEdges } = layoutChildSteps(phase.children, !anyChildHasChildren);
       maps[subMapId] = {
         id: subMapId,
         name: `${phase.label}`,
@@ -247,10 +249,6 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
         subMapId,
       },
     });
-
-    if (i > 0) {
-      phaseEdges.push(makeEdge(phaseNodes[i - 1].id, nodeId));
-    }
   });
 
   maps[rootMapId] = {

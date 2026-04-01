@@ -22,6 +22,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   }, [id, setSelectedNode]);
 
   const isSubprocess = nodeData.nodeType === 'subprocess';
+  const color = nodeData.color || config.color;
 
   const stepCount = isSubprocess && nodeData.subMapId && project
     ? project.maps[nodeData.subMapId]?.nodes.length ?? 0
@@ -33,12 +34,12 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
       onDoubleClick={handleDoubleClick}
       className={`journey-node ${isSubprocess ? 'journey-node--subprocess' : ''} ${selected ? 'journey-node--selected' : ''}`}
       style={{
-        borderColor: nodeData.color || config.color,
-        background: selected ? `${nodeData.color || config.color}15` : '#ffffff',
+        borderColor: color,
+        background: `${color}0a`,
       }}
     >
       <Handle type="target" position={Position.Top} className="journey-handle" />
-      <div className="journey-node__title" style={{ color: nodeData.color || config.color }}>
+      <div className="journey-node__title" style={{ color }}>
         <span className="journey-node__icon">{config.icon}</span>
         <span className="journey-node__name">{nodeData.label}</span>
       </div>
@@ -46,8 +47,8 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
         <div className="journey-node__desc">{nodeData.description}</div>
       )}
       {isSubprocess && (
-        <div className="journey-node__hint">
-          {stepCount > 0 ? `${stepCount} steps — open →` : 'Open →'}
+        <div className="journey-node__hint" style={{ color }}>
+          {stepCount > 0 ? `${stepCount} steps — double-click to open` : 'Double-click to open'}
         </div>
       )}
       <Handle type="source" position={Position.Bottom} className="journey-handle" />
