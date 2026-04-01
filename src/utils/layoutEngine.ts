@@ -2,13 +2,13 @@ import dagre from '@dagrejs/dagre';
 import type { Node, Edge } from '@xyflow/react';
 import type { JourneyNodeData } from '../types';
 
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 80;
-const TERMINAL_SIZE = 80;
+const NODE_WIDTH = 160;
+const NODE_HEIGHT = 60;
+const TERMINAL_SIZE = 56;
 
 function getNodeDimensions(nodeType: string): { width: number; height: number } {
   if (nodeType === 'start' || nodeType === 'end') return { width: TERMINAL_SIZE, height: TERMINAL_SIZE };
-  if (nodeType === 'decision') return { width: 160, height: 100 };
+  if (nodeType === 'decision') return { width: 100, height: 100 };
   return { width: NODE_WIDTH, height: NODE_HEIGHT };
 }
 

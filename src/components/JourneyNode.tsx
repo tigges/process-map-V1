@@ -24,47 +24,60 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const color = nodeData.color || config.color;
   const isSubprocess = nodeData.nodeType === 'subprocess';
   const isDecision = nodeData.nodeType === 'decision';
-  const isTerminal = nodeData.nodeType === 'start' || nodeData.nodeType === 'end';
+  const isStart = nodeData.nodeType === 'start';
+  const isEnd = nodeData.nodeType === 'end';
+  const isTerminal = isStart || isEnd;
 
   const stepCount = isSubprocess && nodeData.subMapId && project
     ? project.maps[nodeData.subMapId]?.nodes.length ?? 0
     : 0;
 
-  const shapeClass = isDecision
-    ? 'jnode--diamond'
-    : isTerminal
-      ? 'jnode--circle'
-      : isSubprocess
-        ? 'jnode--subprocess'
-        : 'jnode--rect';
+  if (isTerminal) {
+    return (
+      <div
+        onClick={handleClick}
+        className={`jnode jnode--circle ${selected ? 'jnode--selected' : ''}`}
+        style={{ borderColor: color, background: color }}
+      >
+        <Handle type="target" position={Position.Left} className="jnode__handle" />
+        <div className="jnode__content">
+          <div className="jnode__label jnode__label--white">{nodeData.label}</div>
+        </div>
+        <Handle type="source" position={Position.Right} className="jnode__handle" />
+      </div>
+    );
+  }
+
+  if (isDecision) {
+    return (
+      <div
+        onClick={handleClick}
+        className={`jnode jnode--diamond ${selected ? 'jnode--selected' : ''}`}
+        style={{ borderColor: color }}
+        title={nodeData.description}
+      >
+        <Handle type="target" position={Position.Left} className="jnode__handle" />
+        <Handle type="source" position={Position.Right} id="right" className="jnode__handle" />
+        <Handle type="source" position={Position.Bottom} id="bottom" className="jnode__handle" />
+        <div className="jnode__content">
+          <div className="jnode__label jnode__label--dark">{nodeData.label}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      className={`jnode ${shapeClass} ${selected ? 'jnode--selected' : ''}`}
-      style={{
-        borderColor: color,
-        background: `${color}15`,
-        ['--node-color' as string]: color,
-      }}
+      className={`jnode ${isSubprocess ? 'jnode--subprocess' : 'jnode--rect'} ${selected ? 'jnode--selected' : ''}`}
+      style={{ borderColor: color, background: `${color}12` }}
     >
       <Handle type="target" position={Position.Left} className="jnode__handle" />
-      {isDecision && (
-        <>
-          <Handle type="source" position={Position.Right} id="right" className="jnode__handle" />
-          <Handle type="source" position={Position.Bottom} id="bottom" className="jnode__handle" />
-        </>
-      )}
-      {!isDecision && (
-        <Handle type="source" position={Position.Right} className="jnode__handle" />
-      )}
-
+      <Handle type="source" position={Position.Right} className="jnode__handle" />
       <div className="jnode__content">
-        <div className="jnode__label" style={{ color: isTerminal ? '#fff' : color }}>
-          {nodeData.label}
-        </div>
-        {nodeData.description && !isTerminal && (
+        <div className="jnode__label" style={{ color }}>{nodeData.label}</div>
+        {nodeData.description && (
           <div className="jnode__desc">{nodeData.description}</div>
         )}
         {isSubprocess && (

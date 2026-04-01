@@ -79,12 +79,28 @@ function isNumberedLine(line: string): boolean {
   return /^\d+[.)]\s/.test(line.trim());
 }
 
+function isTaggedLine(line: string): boolean {
+  return /^\[[\w\s-]+\]\s/.test(line.trim());
+}
+
 function isDashedLine(line: string): boolean {
   return /^[\s]*[-*•]\s/.test(line);
 }
 
-function cleanNumberPrefix(line: string): string {
-  return line.trim().replace(/^\d+[.)]\s*/, '');
+function isHeaderLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (isNumberedLine(trimmed)) return true;
+  if (isDashedLine(trimmed) || isTaggedLine(trimmed)) return false;
+  if (trimmed === trimmed.toUpperCase() && trimmed.length > 3 && /[A-Z]/.test(trimmed)) return true;
+  if (/^#{1,3}\s/.test(trimmed)) return true;
+  return false;
+}
+
+function cleanHeaderPrefix(line: string): string {
+  return line.trim()
+    .replace(/^\d+[.)]\s*/, '')
+    .replace(/^#{1,3}\s*/, '')
+    .trim();
 }
 
 function cleanDashPrefix(line: string): string {
@@ -102,8 +118,8 @@ export function parseTextToSteps(text: string): ParsedStep[] {
     const trimmed = rawLine.trim();
     if (!trimmed) continue;
 
-    if (isNumberedLine(trimmed)) {
-      const content = cleanNumberPrefix(trimmed);
+    if (isHeaderLine(trimmed)) {
+      const content = cleanHeaderPrefix(trimmed);
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = splitLabelDescription(afterPrefix);
 
@@ -116,8 +132,8 @@ export function parseTextToSteps(text: string): ParsedStep[] {
         indent: 0,
       };
       steps.push(currentParent);
-    } else if (isDashedLine(trimmed) && currentParent) {
-      const content = cleanDashPrefix(trimmed);
+    } else if (currentParent) {
+      const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = splitLabelDescription(afterPrefix);
       const nodeType = explicitType ?? 'action';
@@ -130,21 +146,9 @@ export function parseTextToSteps(text: string): ParsedStep[] {
         children: [],
         indent: 1,
       });
-    } else if (currentParent) {
-      const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(trimmed);
-      const { label, description } = splitLabelDescription(afterPrefix);
-      const nodeType = explicitType ?? 'action';
-
-      currentParent.children.push({
-        id: nanoid(),
-        label,
-        description,
-        nodeType,
-        children: [],
-        indent: 1,
-      });
     } else {
-      const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(trimmed);
+      const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
+      const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = splitLabelDescription(afterPrefix);
 
       currentParent = {
