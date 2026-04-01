@@ -9,6 +9,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const navigateToMap = useAppStore((s) => s.navigateToMap);
   const setSelectedNode = useAppStore((s) => s.setSelectedNode);
   const config = NODE_TYPE_CONFIG[nodeData.nodeType];
+  const project = useAppStore((s) => s.getActiveProject());
 
   const handleDoubleClick = useCallback(() => {
     if (nodeData.nodeType === 'subprocess' && nodeData.subMapId) {
@@ -21,35 +22,35 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   }, [id, setSelectedNode]);
 
   const isSubprocess = nodeData.nodeType === 'subprocess';
-  const isDecision = nodeData.nodeType === 'decision';
+
+  const stepCount = isSubprocess && nodeData.subMapId && project
+    ? project.maps[nodeData.subMapId]?.nodes.length ?? 0
+    : 0;
 
   return (
     <div
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      className={`journey-node ${isDecision ? 'journey-node--decision' : ''} ${isSubprocess ? 'journey-node--subprocess' : ''} ${selected ? 'journey-node--selected' : ''}`}
+      className={`journey-node ${isSubprocess ? 'journey-node--subprocess' : ''} ${selected ? 'journey-node--selected' : ''}`}
       style={{
         borderColor: nodeData.color || config.color,
-        background: selected
-          ? `${nodeData.color || config.color}22`
-          : '#ffffff',
+        background: selected ? `${nodeData.color || config.color}15` : '#ffffff',
       }}
     >
-      <Handle type="target" position={Position.Left} className="journey-handle" />
-      <div className="journey-node__header" style={{ background: nodeData.color || config.color }}>
+      <Handle type="target" position={Position.Top} className="journey-handle" />
+      <div className="journey-node__title" style={{ color: nodeData.color || config.color }}>
         <span className="journey-node__icon">{config.icon}</span>
-        <span className="journey-node__type">{config.label}</span>
+        <span className="journey-node__name">{nodeData.label}</span>
       </div>
-      <div className="journey-node__body">
-        <div className="journey-node__label">{nodeData.label}</div>
-        {nodeData.description && (
-          <div className="journey-node__desc">{nodeData.description}</div>
-        )}
-        {isSubprocess && (
-          <div className="journey-node__hint">Double-click to open →</div>
-        )}
-      </div>
-      <Handle type="source" position={Position.Right} className="journey-handle" />
+      {nodeData.description && (
+        <div className="journey-node__desc">{nodeData.description}</div>
+      )}
+      {isSubprocess && (
+        <div className="journey-node__hint">
+          {stepCount > 0 ? `${stepCount} steps — open →` : 'Open →'}
+        </div>
+      )}
+      <Handle type="source" position={Position.Bottom} className="journey-handle" />
     </div>
   );
 }

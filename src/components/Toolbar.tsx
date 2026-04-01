@@ -1,7 +1,14 @@
 import { useAppStore } from '../store/useAppStore';
 import Breadcrumb from './Breadcrumb';
 
-export default function Toolbar() {
+interface ToolbarProps {
+  showPalette: boolean;
+  onTogglePalette: () => void;
+  showInspector: boolean;
+  onToggleInspector: () => void;
+}
+
+export default function Toolbar({ showPalette, onTogglePalette, showInspector, onToggleInspector }: ToolbarProps) {
   const project = useAppStore((s) => s.getActiveProject());
   const activeMap = useAppStore((s) => s.getActiveMap());
 
@@ -16,6 +23,20 @@ export default function Toolbar() {
         )}
       </div>
       <div className="toolbar__right">
+        <button
+          className={`toolbar__toggle ${showPalette ? 'toolbar__toggle--active' : ''}`}
+          onClick={onTogglePalette}
+          title="Toggle node palette"
+        >
+          Palette
+        </button>
+        <button
+          className={`toolbar__toggle ${showInspector ? 'toolbar__toggle--active' : ''}`}
+          onClick={onToggleInspector}
+          title="Toggle inspector"
+        >
+          Inspector
+        </button>
         {project && (
           <span className="toolbar__project-badge">{project.name}</span>
         )}

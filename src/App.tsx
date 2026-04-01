@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import LoginGate from './components/LoginGate';
 import ProjectSidebar from './components/ProjectSidebar';
@@ -15,6 +15,11 @@ export default function App() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const checkAuth = useAuthStore((s) => s.checkAuth);
 
+  const [showPalette, setShowPalette] = useState(false);
+  const [showInspector, setShowInspector] = useState(false);
+
+  const openInspector = useCallback(() => setShowInspector(true), []);
+
   useEffect(() => {
     checkAuth();
     initFromStorage();
@@ -26,11 +31,16 @@ export default function App() {
         <div className="app">
           <ProjectSidebar />
           <div className="app__main">
-            <Toolbar />
+            <Toolbar
+              showPalette={showPalette}
+              onTogglePalette={() => setShowPalette((v) => !v)}
+              showInspector={showInspector}
+              onToggleInspector={() => setShowInspector((v) => !v)}
+            />
             <div className="app__workspace">
-              {activeProjectId && <NodePalette />}
-              <FlowCanvas />
-              <NodeInspector />
+              {activeProjectId && showPalette && <NodePalette />}
+              <FlowCanvas onNodeSelect={openInspector} />
+              {showInspector && <NodeInspector />}
             </div>
           </div>
         </div>

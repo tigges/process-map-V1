@@ -159,20 +159,28 @@ function makeEdge(sourceId: string, targetId: string, label?: string): Edge {
   };
 }
 
+function gridPosition(index: number, columns: number, nodeWidth: number, nodeHeight: number): { x: number; y: number } {
+  const xGap = nodeWidth + 40;
+  const yGap = nodeHeight + 40;
+  const col = index % columns;
+  const row = Math.floor(index / columns);
+  return { x: col * xGap, y: row * yGap };
+}
+
 function layoutChildSteps(
   steps: ParsedStep[],
 ): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
   const nodes: Node<JourneyNodeData>[] = [];
   const edges: Edge[] = [];
-  const xGap = 280;
-  const yGap = 120;
+  const columns = Math.min(Math.ceil(Math.sqrt(steps.length)), 4);
 
   steps.forEach((step, i) => {
     const id = nanoid();
+    const pos = gridPosition(i, columns, 240, 100);
     nodes.push({
       id,
       type: 'journeyNode',
-      position: { x: i * xGap, y: 0 },
+      position: pos,
       data: {
         label: step.label,
         description: step.description,
@@ -184,22 +192,6 @@ function layoutChildSteps(
     if (i > 0) {
       edges.push(makeEdge(nodes[i - 1].id, id));
     }
-
-    step.children.forEach((child, ci) => {
-      const childId = nanoid();
-      nodes.push({
-        id: childId,
-        type: 'journeyNode',
-        position: { x: i * xGap, y: yGap + ci * yGap },
-        data: {
-          label: child.label,
-          description: child.description,
-          nodeType: child.nodeType,
-          color: NODE_COLORS[child.nodeType],
-        },
-      });
-      edges.push(makeEdge(id, childId));
-    });
   });
 
   return { nodes, edges };
@@ -215,7 +207,7 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
 
   const phaseNodes: Node<JourneyNodeData>[] = [];
   const phaseEdges: Edge[] = [];
-  const xGap = 300;
+  const columns = Math.min(Math.ceil(Math.sqrt(phases.length)), 4);
 
   phases.forEach((phase, i) => {
     const nodeId = nanoid();
@@ -238,13 +230,15 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
 
     const childCount = phase.children.length;
     const desc = phase.description
-      ? `${phase.description}${hasChildren ? ` (${childCount} steps inside)` : ''}`
-      : hasChildren ? `${childCount} steps — double-click to explore` : '';
+      ? `${phase.description}${hasChildren ? ` (${childCount} steps)` : ''}`
+      : hasChildren ? `${childCount} steps — open to explore` : '';
+
+    const pos = gridPosition(i, columns, 240, 120);
 
     phaseNodes.push({
       id: nodeId,
       type: 'journeyNode',
-      position: { x: i * xGap, y: 0 },
+      position: pos,
       data: {
         label: phase.label,
         description: desc,

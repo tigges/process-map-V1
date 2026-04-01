@@ -223,7 +223,34 @@ body,
 
 .toolbar__right {
   flex: 1;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.toolbar__toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.toolbar__toggle:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+.toolbar__toggle--active {
+  background: #eef2ff;
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .toolbar__map-name {
@@ -377,12 +404,13 @@ body,
   background: var(--surface);
   border: 2px solid;
   border-radius: var(--radius);
-  min-width: 160px;
-  max-width: 220px;
+  min-width: 180px;
+  max-width: 240px;
   box-shadow: var(--shadow);
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.1s;
   font-family: inherit;
+  padding: 10px 12px;
 }
 
 .journey-node:hover {
@@ -394,58 +422,46 @@ body,
   box-shadow: 0 0 0 2px var(--primary), var(--shadow-lg);
 }
 
-.journey-node--decision {
-  border-radius: 4px;
-  transform: rotate(0deg);
-}
-
 .journey-node--subprocess {
   border-style: dashed;
 }
 
-.journey-node__header {
-  padding: 6px 10px;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+.journey-node__title {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: white;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 
 .journey-node__icon {
-  font-size: 12px;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
-.journey-node__type {
-  font-size: 10px;
-}
-
-.journey-node__body {
-  padding: 8px 10px;
-}
-
-.journey-node__label {
-  font-size: 13px;
-  font-weight: 600;
+.journey-node__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
-  margin-bottom: 2px;
 }
 
 .journey-node__desc {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .journey-node__hint {
   font-size: 10px;
   color: var(--primary);
   margin-top: 4px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .journey-handle {

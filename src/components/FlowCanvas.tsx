@@ -1,10 +1,11 @@
-import { useCallback, useRef, useMemo, type DragEvent } from 'react';
+import { useCallback, useRef, useMemo, useEffect, type DragEvent } from 'react';
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
   BackgroundVariant,
+  useReactFlow,
   type ReactFlowInstance,
   type Node,
   type Edge,
@@ -16,9 +17,11 @@ import type { JourneyNodeType, JourneyNodeData } from '../types';
 
 const nodeTypes = { journeyNode: JourneyNode };
 
-export default function FlowCanvas() {
+export default function FlowCanvas({ onNodeSelect }: { onNodeSelect?: () => void }) {
   const reactFlowRef = useRef<ReactFlowInstance<Node<JourneyNodeData>, Edge> | null>(null);
+  const { fitView } = useReactFlow();
 
+  const activeMapId = useAppStore((s) => s.activeMapId);
   const activeMap = useAppStore((s) => s.getActiveMap());
   const onNodesChange = useAppStore((s) => s.onNodesChange);
   const onEdgesChange = useAppStore((s) => s.onEdgesChange);
@@ -30,9 +33,16 @@ export default function FlowCanvas() {
   const nodes = useMemo(() => activeMap?.nodes ?? [], [activeMap]);
   const edges = useMemo(() => activeMap?.edges ?? [], [activeMap]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fitView({ padding: 0.15, duration: 300 });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [activeMapId, fitView]);
+
   const onInit = useCallback((instance: ReactFlowInstance<Node<JourneyNodeData>, Edge>) => {
     reactFlowRef.current = instance;
-    instance.fitView({ padding: 0.2 });
+    instance.fitView({ padding: 0.15 });
   }, []);
 
   const onDragOver = useCallback((e: DragEvent) => {
@@ -58,6 +68,10 @@ export default function FlowCanvas() {
   const onPaneClick = useCallback(() => {
     setSelectedNode(null);
   }, [setSelectedNode]);
+
+  const onNodeClick = useCallback(() => {
+    onNodeSelect?.();
+  }, [onNodeSelect]);
 
   const onNodeDragStop = useCallback(() => {
     persist();
@@ -85,6 +99,7 @@ export default function FlowCanvas() {
         onDragOver={onDragOver}
         onDrop={onDrop}
         onPaneClick={onPaneClick}
+        onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         fitView
         snapToGrid
