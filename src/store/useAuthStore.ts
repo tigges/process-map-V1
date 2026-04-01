@@ -35,6 +35,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   appPassword: null,
 
   checkAuth() {
+    // Password feature disabled for testing — set DEV_SKIP_AUTH to false to re-enable
+    const DEV_SKIP_AUTH = true;
+    if (DEV_SKIP_AUTH) {
+      set({ isAuthenticated: true, appPassword: null });
+      return;
+    }
     const passwords = loadPasswords();
     if (!passwords.app) {
       set({ isAuthenticated: true, appPassword: null });
