@@ -8,6 +8,7 @@ export interface ProcessMapProject {
   updatedAt: string;
   rootMapId: string;
   maps: Record<string, ProcessMap>;
+  isDraft?: boolean;
 }
 
 export interface ProcessMap {

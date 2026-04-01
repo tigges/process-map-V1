@@ -2,7 +2,8 @@ import { nanoid } from 'nanoid';
 import type { ProcessMapProject, ProcessMap, JourneyNodeData, JourneyNodeType } from '../types';
 import type { Node, Edge } from '@xyflow/react';
 
-interface ParsedStep {
+export interface ParsedStep {
+  id: string;
   label: string;
   description: string;
   nodeType: JourneyNodeType;
@@ -122,6 +123,7 @@ export function parseTextToSteps(text: string): ParsedStep[] {
     const nodeType = explicitType ?? detectNodeType(afterPrefix);
 
     const step: ParsedStep = {
+      id: nanoid(),
       label,
       description,
       nodeType,
@@ -145,22 +147,32 @@ export function parseTextToSteps(text: string): ParsedStep[] {
   return steps;
 }
 
-function layoutSteps(
+function makeEdge(sourceId: string, targetId: string, label?: string): Edge {
+  return {
+    id: `e-${sourceId}-${targetId}`,
+    source: sourceId,
+    target: targetId,
+    label,
+    type: 'smoothstep',
+    animated: true,
+    style: { stroke: '#94a3b8', strokeWidth: 2 },
+  };
+}
+
+function layoutChildSteps(
   steps: ParsedStep[],
-  startX: number,
-  startY: number,
 ): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
   const nodes: Node<JourneyNodeData>[] = [];
   const edges: Edge[] = [];
-  const xGap = 300;
-  const yGap = 140;
+  const xGap = 280;
+  const yGap = 120;
 
   steps.forEach((step, i) => {
     const id = nanoid();
     nodes.push({
       id,
       type: 'journeyNode',
-      position: { x: startX + i * xGap, y: startY },
+      position: { x: i * xGap, y: 0 },
       data: {
         label: step.label,
         description: step.description,
@@ -170,14 +182,7 @@ function layoutSteps(
     });
 
     if (i > 0) {
-      edges.push({
-        id: `e-${nodes[i - 1].id}-${id}`,
-        source: nodes[i - 1].id,
-        target: id,
-        type: 'smoothstep',
-        animated: true,
-        style: { stroke: '#94a3b8', strokeWidth: 2 },
-      });
+      edges.push(makeEdge(nodes[i - 1].id, id));
     }
 
     step.children.forEach((child, ci) => {
@@ -185,7 +190,7 @@ function layoutSteps(
       nodes.push({
         id: childId,
         type: 'journeyNode',
-        position: { x: startX + i * xGap + (ci % 2 === 0 ? 0 : 150), y: startY + yGap + ci * yGap },
+        position: { x: i * xGap, y: yGap + ci * yGap },
         data: {
           label: child.label,
           description: child.description,
@@ -193,83 +198,90 @@ function layoutSteps(
           color: NODE_COLORS[child.nodeType],
         },
       });
-      edges.push({
-        id: `e-${id}-${childId}`,
-        source: id,
-        target: childId,
-        type: 'smoothstep',
-        animated: true,
-        style: { stroke: '#94a3b8', strokeWidth: 2 },
-      });
+      edges.push(makeEdge(id, childId));
     });
   });
 
   return { nodes, edges };
 }
 
-export function parseTextToProject(text: string, projectName: string): ProcessMapProject {
-  const steps = parseTextToSteps(text);
+export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft: boolean): ProcessMapProject {
   const projectId = nanoid();
   const rootMapId = nanoid();
   const maps: Record<string, ProcessMap> = {};
 
-  const topLevelSteps = steps.filter((s) => s.children.length > 0 || s.indent === 0);
-  const topLevel = topLevelSteps.length > 0 ? topLevelSteps : steps;
+  const topLevel = steps.filter((s) => s.indent === 0);
+  const phases = topLevel.length > 0 ? topLevel : steps;
 
-  const { nodes: rootNodes, edges: rootEdges } = layoutSteps(topLevel, 0, 0);
+  const phaseNodes: Node<JourneyNodeData>[] = [];
+  const phaseEdges: Edge[] = [];
+  const xGap = 300;
 
-  const subMapsToCreate: { parentNodeId: string; children: ParsedStep[] }[] = [];
-  topLevel.forEach((step, i) => {
-    if (step.children.length > 0) {
-      subMapsToCreate.push({
-        parentNodeId: rootNodes[i].id,
-        children: step.children,
-      });
+  phases.forEach((phase, i) => {
+    const nodeId = nanoid();
+    const hasChildren = phase.children.length > 0;
+
+    let subMapId: string | undefined;
+    if (hasChildren) {
+      subMapId = nanoid();
+      const { nodes: subNodes, edges: subEdges } = layoutChildSteps(phase.children);
+      maps[subMapId] = {
+        id: subMapId,
+        name: `${phase.label}`,
+        description: phase.description || `Details for ${phase.label}`,
+        parentMapId: rootMapId,
+        parentNodeId: nodeId,
+        nodes: subNodes,
+        edges: subEdges,
+      };
+    }
+
+    const childCount = phase.children.length;
+    const desc = phase.description
+      ? `${phase.description}${hasChildren ? ` (${childCount} steps inside)` : ''}`
+      : hasChildren ? `${childCount} steps — double-click to explore` : '';
+
+    phaseNodes.push({
+      id: nodeId,
+      type: 'journeyNode',
+      position: { x: i * xGap, y: 0 },
+      data: {
+        label: phase.label,
+        description: desc,
+        nodeType: hasChildren ? 'subprocess' : phase.nodeType,
+        color: hasChildren ? NODE_COLORS.subprocess : NODE_COLORS[phase.nodeType],
+        subMapId,
+      },
+    });
+
+    if (i > 0) {
+      phaseEdges.push(makeEdge(phaseNodes[i - 1].id, nodeId));
     }
   });
-
-  for (const { parentNodeId, children } of subMapsToCreate) {
-    if (children.length === 0) continue;
-    const subMapId = nanoid();
-    const parentNode = rootNodes.find((n) => n.id === parentNodeId);
-    if (!parentNode) continue;
-
-    parentNode.data = {
-      ...parentNode.data,
-      nodeType: 'subprocess',
-      color: NODE_COLORS.subprocess,
-      subMapId,
-    };
-
-    const { nodes: subNodes, edges: subEdges } = layoutSteps(children, 0, 0);
-    maps[subMapId] = {
-      id: subMapId,
-      name: `${parentNode.data.label} — Details`,
-      description: `Sub-process details for ${parentNode.data.label}`,
-      parentMapId: rootMapId,
-      parentNodeId,
-      nodes: subNodes,
-      edges: subEdges,
-    };
-  }
 
   maps[rootMapId] = {
     id: rootMapId,
     name: 'Overview',
-    description: 'Auto-generated from text import',
+    description: 'Top-level journey phases',
     parentMapId: null,
     parentNodeId: null,
-    nodes: rootNodes,
-    edges: rootEdges,
+    nodes: phaseNodes,
+    edges: phaseEdges,
   };
 
   return {
     id: projectId,
     name: projectName,
-    description: 'Imported from text input',
+    description: isDraft ? 'Draft — review and finalize' : 'Imported from text',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     rootMapId,
     maps,
+    isDraft,
   };
+}
+
+export function parseTextToProject(text: string, projectName: string): ProcessMapProject {
+  const steps = parseTextToSteps(text);
+  return stepsToProject(steps, projectName, false);
 }

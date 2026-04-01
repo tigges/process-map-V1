@@ -12,6 +12,8 @@ export default function ProjectSidebar() {
   const createSampleProject = useAppStore((s) => s.createSampleProject);
   const exportActiveProject = useAppStore((s) => s.exportActiveProject);
   const importProject = useAppStore((s) => s.importProject);
+  const finalizeProject = useAppStore((s) => s.finalizeProject);
+  const discardDraft = useAppStore((s) => s.discardDraft);
 
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
@@ -74,8 +76,27 @@ export default function ProjectSidebar() {
               className={`sidebar__project ${p.id === activeProjectId ? 'sidebar__project--active' : ''}`}
               onClick={() => setActiveProject(p.id)}
             >
-              <div className="sidebar__project-name">{p.name}</div>
+              <div className="sidebar__project-name">
+                {p.name}
+                {p.isDraft && <span className="sidebar__draft-badge">Draft</span>}
+              </div>
               <div className="sidebar__project-desc">{p.description}</div>
+              {p.isDraft && p.id === activeProjectId && (
+                <div className="sidebar__draft-actions">
+                  <button
+                    className="btn btn--primary btn--sm"
+                    onClick={(e) => { e.stopPropagation(); finalizeProject(p.id); }}
+                  >
+                    Finalize
+                  </button>
+                  <button
+                    className="btn btn--danger btn--sm"
+                    onClick={(e) => { e.stopPropagation(); if (confirm('Discard this draft?')) discardDraft(p.id); }}
+                  >
+                    Discard
+                  </button>
+                </div>
+              )}
               <button
                 className="sidebar__project-delete"
                 onClick={(e) => {

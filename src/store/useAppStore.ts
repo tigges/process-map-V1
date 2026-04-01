@@ -60,6 +60,10 @@ interface AppState {
   exportActiveProject: () => string;
   importProject: (json: string) => void;
 
+  // Draft management
+  finalizeProject: (id: string) => void;
+  discardDraft: (id: string) => void;
+
   // Persist
   persist: () => void;
 }
@@ -384,6 +388,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (e) {
       console.error('Import failed:', e);
     }
+  },
+
+  finalizeProject(id) {
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === id ? { ...p, isDraft: false, description: p.description.replace('Draft — review and finalize', 'Imported from text') } : p,
+      ),
+    }));
+    get().persist();
+  },
+
+  discardDraft(id) {
+    get().deleteProject(id);
   },
 
   persist() {
