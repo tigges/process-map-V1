@@ -22,13 +22,10 @@ export interface ProcessMap {
 }
 
 export type JourneyNodeType =
-  | 'phase'
-  | 'touchpoint'
+  | 'start'
   | 'action'
   | 'decision'
-  | 'emotion'
-  | 'painPoint'
-  | 'opportunity'
+  | 'end'
   | 'subprocess';
 
 export interface JourneyNodeData {
@@ -42,14 +39,11 @@ export interface JourneyNodeData {
 
 export const NODE_TYPE_CONFIG: Record<
   JourneyNodeType,
-  { label: string; color: string; icon: string }
+  { label: string; color: string; icon: string; shape: string }
 > = {
-  phase: { label: 'Phase', color: '#6366f1', icon: '📦' },
-  touchpoint: { label: 'Touchpoint', color: '#0ea5e9', icon: '👆' },
-  action: { label: 'Action', color: '#10b981', icon: '⚡' },
-  decision: { label: 'Decision', color: '#f59e0b', icon: '🔀' },
-  emotion: { label: 'Emotion', color: '#ec4899', icon: '💭' },
-  painPoint: { label: 'Pain Point', color: '#ef4444', icon: '🔥' },
-  opportunity: { label: 'Opportunity', color: '#8b5cf6', icon: '💡' },
-  subprocess: { label: 'Sub-process', color: '#64748b', icon: '🔗' },
+  start: { label: 'Start', color: '#22c55e', icon: '▶', shape: 'circle' },
+  action: { label: 'Action', color: '#3b82f6', icon: '■', shape: 'rectangle' },
+  decision: { label: 'Decision', color: '#eab308', icon: '◆', shape: 'diamond' },
+  end: { label: 'End', color: '#ef4444', icon: '●', shape: 'circle' },
+  subprocess: { label: 'Sub-process', color: '#64748b', icon: '▭', shape: 'rectangle' },
 };

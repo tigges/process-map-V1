@@ -21,37 +21,58 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
     setSelectedNode(id);
   }, [id, setSelectedNode]);
 
-  const isSubprocess = nodeData.nodeType === 'subprocess';
   const color = nodeData.color || config.color;
+  const isSubprocess = nodeData.nodeType === 'subprocess';
+  const isDecision = nodeData.nodeType === 'decision';
+  const isTerminal = nodeData.nodeType === 'start' || nodeData.nodeType === 'end';
 
   const stepCount = isSubprocess && nodeData.subMapId && project
     ? project.maps[nodeData.subMapId]?.nodes.length ?? 0
     : 0;
 
+  const shapeClass = isDecision
+    ? 'jnode--diamond'
+    : isTerminal
+      ? 'jnode--circle'
+      : isSubprocess
+        ? 'jnode--subprocess'
+        : 'jnode--rect';
+
   return (
     <div
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      className={`journey-node ${isSubprocess ? 'journey-node--subprocess' : ''} ${selected ? 'journey-node--selected' : ''}`}
+      className={`jnode ${shapeClass} ${selected ? 'jnode--selected' : ''}`}
       style={{
         borderColor: color,
-        background: `${color}0a`,
+        background: `${color}15`,
+        ['--node-color' as string]: color,
       }}
     >
-      <Handle type="target" position={Position.Top} className="journey-handle" />
-      <div className="journey-node__title" style={{ color }}>
-        <span className="journey-node__icon">{config.icon}</span>
-        <span className="journey-node__name">{nodeData.label}</span>
-      </div>
-      {nodeData.description && (
-        <div className="journey-node__desc">{nodeData.description}</div>
+      <Handle type="target" position={Position.Left} className="jnode__handle" />
+      {isDecision && (
+        <>
+          <Handle type="source" position={Position.Right} id="right" className="jnode__handle" />
+          <Handle type="source" position={Position.Bottom} id="bottom" className="jnode__handle" />
+        </>
       )}
-      {isSubprocess && (
-        <div className="journey-node__hint" style={{ color }}>
-          {stepCount > 0 ? `${stepCount} steps — double-click to open` : 'Double-click to open'}
+      {!isDecision && (
+        <Handle type="source" position={Position.Right} className="jnode__handle" />
+      )}
+
+      <div className="jnode__content">
+        <div className="jnode__label" style={{ color: isTerminal ? '#fff' : color }}>
+          {nodeData.label}
         </div>
-      )}
-      <Handle type="source" position={Position.Bottom} className="journey-handle" />
+        {nodeData.description && !isTerminal && (
+          <div className="jnode__desc">{nodeData.description}</div>
+        )}
+        {isSubprocess && (
+          <div className="jnode__hint" style={{ color }}>
+            {stepCount > 0 ? `${stepCount} steps` : 'Open'}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

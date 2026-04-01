@@ -399,72 +399,92 @@ body,
   margin-bottom: 8px;
 }
 
-/* ===== Journey Node ===== */
-.journey-node {
-  background: var(--surface);
-  border: 2px solid;
-  border-radius: var(--radius);
-  min-width: 180px;
-  max-width: 240px;
-  box-shadow: var(--shadow);
+/* ===== Flow Chart Nodes ===== */
+.jnode {
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.1s;
   font-family: inherit;
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
-.journey-node:hover {
-  box-shadow: var(--shadow-lg);
+.jnode:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   transform: translateY(-1px);
 }
 
-.journey-node--selected {
-  box-shadow: 0 0 0 2px var(--primary), var(--shadow-lg);
+.jnode--selected {
+  box-shadow: 0 0 0 3px var(--primary), 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 
-.journey-node--subprocess {
-  border-style: dashed;
+.jnode--rect {
+  border: 2px solid;
+  border-radius: var(--radius);
+  min-width: 160px;
+  max-width: 240px;
+  padding: 10px 14px;
 }
 
-.journey-node__title {
+.jnode--subprocess {
+  border: 2px dashed;
+  border-radius: var(--radius);
+  min-width: 160px;
+  max-width: 240px;
+  padding: 10px 14px;
+}
+
+.jnode--circle {
+  border: 3px solid;
+  border-radius: 50%;
+  width: 80px;
+  height: 80px;
+  padding: 8px;
+}
+
+.jnode--diamond {
+  border: 2px solid;
+  min-width: 140px;
+  min-height: 80px;
+  padding: 16px 24px;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  background: #fef9c3 !important;
+}
+
+.jnode__content {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: 2px;
+  width: 100%;
+}
+
+.jnode__label {
+  font-size: 12px;
   font-weight: 700;
-  margin-bottom: 4px;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
-.journey-node__icon {
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.journey-node__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-}
-
-.journey-node__desc {
-  font-size: 11px;
+.jnode__desc {
+  font-size: 10px;
   color: var(--text-muted);
-  line-height: 1.4;
+  line-height: 1.3;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  text-align: center;
 }
 
-.journey-node__hint {
-  font-size: 10px;
-  color: var(--primary);
-  margin-top: 4px;
+.jnode__hint {
+  font-size: 9px;
   font-weight: 600;
+  margin-top: 2px;
 }
 
-.journey-handle {
+.jnode__handle {
   width: 8px !important;
   height: 8px !important;
   background: var(--primary) !important;

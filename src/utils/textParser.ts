@@ -11,68 +11,67 @@ export interface ParsedStep {
   indent: number;
 }
 
-const TYPE_KEYWORDS: Record<string, JourneyNodeType> = {
-  'phase': 'phase',
-  'stage': 'phase',
-  'step': 'action',
-  'action': 'action',
-  'touchpoint': 'touchpoint',
-  'touch point': 'touchpoint',
-  'channel': 'touchpoint',
-  'decision': 'decision',
-  'choose': 'decision',
-  'if ': 'decision',
-  'emotion': 'emotion',
-  'feeling': 'emotion',
-  'feel': 'emotion',
-  'pain': 'painPoint',
-  'pain point': 'painPoint',
-  'frustration': 'painPoint',
-  'problem': 'painPoint',
-  'issue': 'painPoint',
-  'opportunity': 'opportunity',
-  'improve': 'opportunity',
-  'idea': 'opportunity',
-  'subprocess': 'subprocess',
-  'sub-process': 'subprocess',
-  'sub process': 'subprocess',
-  'detail': 'subprocess',
-};
-
 const NODE_COLORS: Record<JourneyNodeType, string> = {
-  phase: '#6366f1',
-  touchpoint: '#0ea5e9',
-  action: '#10b981',
-  decision: '#f59e0b',
-  emotion: '#ec4899',
-  painPoint: '#ef4444',
-  opportunity: '#8b5cf6',
+  start: '#22c55e',
+  action: '#3b82f6',
+  decision: '#eab308',
+  end: '#ef4444',
   subprocess: '#64748b',
 };
 
-function detectNodeType(text: string): JourneyNodeType {
+const ASCII_ART = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬▼▲►◄●○■□▪▫◆◇★☆✓✗→←↑↓⇒⇐⇑⇓]/g;
+const SEPARATOR_LINE = /^[\s─═\-_~*#]{4,}$/;
+const BOX_LINE = /^[\s]*[┌┐└┘├┤│║╔╗╚╝╠╣].*/;
+
+function stripAsciiArt(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !SEPARATOR_LINE.test(line))
+    .filter((line) => !BOX_LINE.test(line))
+    .map((line) => line.replace(ASCII_ART, ' ').replace(/\s{2,}/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .join('\n');
+}
+
+const EXPLICIT_TAGS: Record<string, JourneyNodeType> = {
+  'start': 'start',
+  'begin': 'start',
+  'end': 'end',
+  'finish': 'end',
+  'resolve': 'end',
+  'action': 'action',
+  'step': 'action',
+  'touchpoint': 'action',
+  'touch point': 'action',
+  'decision': 'decision',
+  'check': 'decision',
+  'subprocess': 'subprocess',
+  'sub-process': 'subprocess',
+  'sub process': 'subprocess',
+  'phase': 'subprocess',
+  'stage': 'subprocess',
+  'category': 'subprocess',
+  'pain point': 'action',
+  'pain': 'action',
+  'opportunity': 'action',
+  'emotion': 'action',
+};
+
+function detectNodeType(text: string, hasChildren: boolean): JourneyNodeType {
+  if (hasChildren) return 'subprocess';
   const lower = text.toLowerCase();
-
-  for (const [keyword, type] of Object.entries(TYPE_KEYWORDS)) {
-    if (lower.includes(keyword)) return type;
-  }
-
-  if (lower.includes('?') || lower.startsWith('should') || lower.startsWith('does') || lower.startsWith('will') || lower.startsWith('can')) {
+  if (lower.includes('?') || lower.startsWith('should') || lower.startsWith('does') || lower.startsWith('will') || lower.startsWith('can') || lower.startsWith('is ')) {
     return 'decision';
   }
-
-  return 'phase';
+  return 'action';
 }
 
 function extractTypePrefix(line: string): { type: JourneyNodeType | null; cleaned: string } {
-  const prefixPattern = /^\[(\w[\w\s-]*)\]\s*/i;
-  const match = line.match(prefixPattern);
+  const match = line.match(/^\[(\w[\w\s-]*)\]\s*/i);
   if (match) {
     const tag = match[1].toLowerCase().trim();
-    const mapped = TYPE_KEYWORDS[tag];
-    if (mapped) {
-      return { type: mapped, cleaned: line.slice(match[0].length) };
-    }
+    const mapped = EXPLICIT_TAGS[tag];
+    if (mapped) return { type: mapped, cleaned: line.slice(match[0].length) };
   }
   return { type: null, cleaned: line };
 }
@@ -85,7 +84,7 @@ function parseIndent(line: string): number {
 
 function cleanLine(line: string): string {
   return line
-    .replace(/^[\s]*[-*•→>]+\s*/, '')
+    .replace(/^[\s]*[-*•>]+\s*/, '')
     .replace(/^\d+[.)]\s*/, '')
     .trim();
 }
@@ -93,34 +92,66 @@ function cleanLine(line: string): string {
 function splitLabelDescription(text: string): { label: string; description: string } {
   const colonIdx = text.indexOf(':');
   if (colonIdx > 0 && colonIdx < 60) {
-    return {
-      label: text.slice(0, colonIdx).trim(),
-      description: text.slice(colonIdx + 1).trim(),
-    };
+    return { label: text.slice(0, colonIdx).trim(), description: text.slice(colonIdx + 1).trim() };
   }
   const dashIdx = text.indexOf(' - ');
   if (dashIdx > 0 && dashIdx < 60) {
-    return {
-      label: text.slice(0, dashIdx).trim(),
-      description: text.slice(dashIdx + 3).trim(),
-    };
+    return { label: text.slice(0, dashIdx).trim(), description: text.slice(dashIdx + 3).trim() };
   }
   return { label: text.slice(0, 50), description: text.length > 50 ? text : '' };
 }
 
+function detectSections(text: string): string {
+  const lines = text.split('\n');
+  const result: string[] = [];
+  let sectionIdx = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const isAllCaps = trimmed === trimmed.toUpperCase() && trimmed.length > 3 && /[A-Z]/.test(trimmed);
+    const nextLine = lines[i + 1]?.trim() ?? '';
+    const nextIsIndented = nextLine.startsWith('-') || nextLine.startsWith('  ') || nextLine.match(/^\d+[.)]/);
+    const isSectionHeader = isAllCaps || (trimmed.match(/^#{1,3}\s/) !== null);
+
+    if (isSectionHeader || (!line.startsWith(' ') && !line.startsWith('-') && nextIsIndented && !line.match(/^\d+[.)]/))) {
+      sectionIdx++;
+      const cleaned = trimmed.replace(/^#{1,3}\s*/, '').replace(/[=\-_*#]+$/, '').trim();
+      if (cleaned.length > 0) {
+        result.push(`${sectionIdx}. ${cleaned}`);
+        continue;
+      }
+    }
+
+    if (line.startsWith('  ') || line.startsWith('\t') || line.startsWith('-') || line.startsWith('*')) {
+      result.push(line);
+    } else if (line.match(/^\d+[.)]/)) {
+      result.push(line);
+    } else {
+      result.push(`  - ${trimmed}`);
+    }
+  }
+
+  return result.join('\n');
+}
+
 export function parseTextToSteps(text: string): ParsedStep[] {
-  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+  const cleaned = stripAsciiArt(text);
+  const structured = detectSections(cleaned);
+  const lines = structured.split('\n').filter((l) => l.trim().length > 0);
   const steps: ParsedStep[] = [];
   const stack: { step: ParsedStep; indent: number }[] = [];
 
   for (const rawLine of lines) {
     const indent = parseIndent(rawLine);
-    const cleaned = cleanLine(rawLine);
-    if (!cleaned) continue;
+    const lineContent = cleanLine(rawLine);
+    if (!lineContent) continue;
 
-    const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(cleaned);
+    const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(lineContent);
     const { label, description } = splitLabelDescription(afterPrefix);
-    const nodeType = explicitType ?? detectNodeType(afterPrefix);
+    const nodeType = explicitType ?? 'action';
 
     const step: ParsedStep = {
       id: nanoid(),
@@ -140,8 +171,14 @@ export function parseTextToSteps(text: string): ParsedStep[] {
     } else {
       steps.push(step);
     }
-
     stack.push({ step, indent });
+  }
+
+  for (const step of steps) {
+    if (step.children.length > 0 && step.nodeType === 'action') {
+      step.nodeType = 'subprocess';
+    }
+    step.nodeType = detectNodeType(step.label, step.children.length > 0);
   }
 
   return steps;
@@ -156,32 +193,43 @@ function makeEdge(sourceId: string, targetId: string, label?: string): Edge {
     type: 'smoothstep',
     animated: true,
     style: { stroke: '#94a3b8', strokeWidth: 2 },
+    ...(label ? { labelStyle: { fontSize: 11, fontWeight: 600 } } : {}),
   };
 }
 
-function gridPosition(index: number, columns: number, nodeWidth: number, nodeHeight: number): { x: number; y: number } {
-  const xGap = nodeWidth + 40;
-  const yGap = nodeHeight + 40;
+function gridPosition(index: number, columns: number, w: number, h: number): { x: number; y: number } {
   const col = index % columns;
   const row = Math.floor(index / columns);
-  return { x: col * xGap, y: row * yGap };
+  return { x: col * (w + 40), y: row * (h + 40) };
 }
 
-function layoutChildSteps(
+function layoutAsFlow(
   steps: ParsedStep[],
-  isLeafLevel: boolean,
 ): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
   const nodes: Node<JourneyNodeData>[] = [];
   const edges: Edge[] = [];
-  const columns = Math.min(Math.ceil(Math.sqrt(steps.length)), 4);
+  const xGap = 260;
+  const yBranch = 140;
 
-  steps.forEach((step, i) => {
-    const id = nanoid();
-    const pos = gridPosition(i, columns, 240, 100);
+  const startId = nanoid();
+  nodes.push({
+    id: startId,
+    type: 'journeyNode',
+    position: { x: 0, y: 0 },
+    data: { label: 'Start', description: '', nodeType: 'start', color: NODE_COLORS.start },
+  });
+
+  let prevId = startId;
+  let xPos = xGap;
+
+  steps.forEach((step) => {
+    const nodeId = nanoid();
+    const isDecision = step.nodeType === 'decision';
+
     nodes.push({
-      id,
+      id: nodeId,
       type: 'journeyNode',
-      position: pos,
+      position: { x: xPos, y: 0 },
       data: {
         label: step.label,
         description: step.description,
@@ -189,11 +237,31 @@ function layoutChildSteps(
         color: NODE_COLORS[step.nodeType],
       },
     });
+    edges.push(makeEdge(prevId, nodeId));
 
-    if (isLeafLevel && i > 0) {
-      edges.push(makeEdge(nodes[i - 1].id, id));
+    if (isDecision && step.description) {
+      const yesId = nanoid();
+      nodes.push({
+        id: yesId,
+        type: 'journeyNode',
+        position: { x: xPos, y: yBranch },
+        data: { label: step.description, description: '', nodeType: 'action', color: NODE_COLORS.action },
+      });
+      edges.push({ ...makeEdge(nodeId, yesId, 'Yes'), sourceHandle: 'bottom' });
     }
+
+    prevId = nodeId;
+    xPos += xGap;
   });
+
+  const endId = nanoid();
+  nodes.push({
+    id: endId,
+    type: 'journeyNode',
+    position: { x: xPos, y: 0 },
+    data: { label: 'End', description: '', nodeType: 'end', color: NODE_COLORS.end },
+  });
+  edges.push(makeEdge(prevId, endId));
 
   return { nodes, edges };
 }
@@ -207,7 +275,6 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
   const phases = topLevel.length > 0 ? topLevel : steps;
 
   const phaseNodes: Node<JourneyNodeData>[] = [];
-  const phaseEdges: Edge[] = [];
   const columns = Math.min(Math.ceil(Math.sqrt(phases.length)), 4);
 
   phases.forEach((phase, i) => {
@@ -217,11 +284,10 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
     let subMapId: string | undefined;
     if (hasChildren) {
       subMapId = nanoid();
-      const anyChildHasChildren = phase.children.some((c) => c.children.length > 0);
-      const { nodes: subNodes, edges: subEdges } = layoutChildSteps(phase.children, !anyChildHasChildren);
+      const { nodes: subNodes, edges: subEdges } = layoutAsFlow(phase.children);
       maps[subMapId] = {
         id: subMapId,
-        name: `${phase.label}`,
+        name: phase.label,
         description: phase.description || `Details for ${phase.label}`,
         parentMapId: rootMapId,
         parentNodeId: nodeId,
@@ -233,7 +299,7 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
     const childCount = phase.children.length;
     const desc = phase.description
       ? `${phase.description}${hasChildren ? ` (${childCount} steps)` : ''}`
-      : hasChildren ? `${childCount} steps — open to explore` : '';
+      : hasChildren ? `${childCount} steps` : '';
 
     const pos = gridPosition(i, columns, 240, 120);
 
@@ -254,11 +320,11 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
   maps[rootMapId] = {
     id: rootMapId,
     name: 'Overview',
-    description: 'Top-level journey phases',
+    description: 'Top-level categories',
     parentMapId: null,
     parentNodeId: null,
     nodes: phaseNodes,
-    edges: phaseEdges,
+    edges: [],
   };
 
   return {
