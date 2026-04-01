@@ -53,16 +53,6 @@ const EXPLICIT_TAGS: Record<string, JourneyNodeType> = {
   'stage': 'subprocess', 'category': 'subprocess',
 };
 
-function detectNodeType(text: string, hasChildren: boolean): JourneyNodeType {
-  if (hasChildren) return 'subprocess';
-  const lower = text.toLowerCase();
-  if (lower.includes('?') || lower.startsWith('should') || lower.startsWith('does') ||
-      lower.startsWith('will') || lower.startsWith('can') || lower.startsWith('is ')) {
-    return 'decision';
-  }
-  return 'action';
-}
-
 function extractTypePrefix(line: string): { type: JourneyNodeType | null; cleaned: string } {
   const match = line.match(/^\[(\w[\w\s-]*)\]\s*/i);
   if (match) {
@@ -71,19 +61,6 @@ function extractTypePrefix(line: string): { type: JourneyNodeType | null; cleane
     if (mapped) return { type: mapped, cleaned: line.slice(match[0].length) };
   }
   return { type: null, cleaned: line };
-}
-
-function parseIndent(line: string): number {
-  const match = line.match(/^(\s*)/);
-  const spaces = match ? match[1].length : 0;
-  return Math.floor(spaces / 2);
-}
-
-function cleanLine(line: string): string {
-  return line
-    .replace(/^[\s]*[-*•>]+\s*/, '')
-    .replace(/^\d+[.)]\s*/, '')
-    .trim();
 }
 
 function splitLabelDescription(text: string): { label: string; description: string } {
@@ -98,84 +75,94 @@ function splitLabelDescription(text: string): { label: string; description: stri
   return { label: text.slice(0, 50), description: text.length > 50 ? text : '' };
 }
 
-function detectSections(text: string): string {
-  const lines = text.split('\n');
-  const result: string[] = [];
-  let sectionIdx = 0;
+function isNumberedLine(line: string): boolean {
+  return /^\d+[.)]\s/.test(line.trim());
+}
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+function isDashedLine(line: string): boolean {
+  return /^[\s]*[-*•]\s/.test(line);
+}
 
-    const isAllCaps = trimmed === trimmed.toUpperCase() && trimmed.length > 3 && /[A-Z]/.test(trimmed);
-    const nextLine = lines[i + 1]?.trim() ?? '';
-    const nextIsIndented = nextLine.startsWith('-') || nextLine.startsWith('  ') || !!nextLine.match(/^\d+[.)]/);
-    const isSectionHeader = isAllCaps || (!!trimmed.match(/^#{1,3}\s/));
+function cleanNumberPrefix(line: string): string {
+  return line.trim().replace(/^\d+[.)]\s*/, '');
+}
 
-    if (isSectionHeader || (!line.startsWith(' ') && !line.startsWith('-') && nextIsIndented && !line.match(/^\d+[.)]/))) {
-      sectionIdx++;
-      const cleaned = trimmed.replace(/^#{1,3}\s*/, '').replace(/[=\-_*#]+$/, '').trim();
-      if (cleaned.length > 0) {
-        result.push(`${sectionIdx}. ${cleaned}`);
-        continue;
-      }
-    }
-
-    if (line.startsWith('  ') || line.startsWith('\t') || line.startsWith('-') || line.startsWith('*')) {
-      result.push(line);
-    } else if (line.match(/^\d+[.)]/)) {
-      result.push(line);
-    } else {
-      result.push(`  - ${trimmed}`);
-    }
-  }
-
-  return result.join('\n');
+function cleanDashPrefix(line: string): string {
+  return line.trim().replace(/^[-*•]\s*/, '');
 }
 
 export function parseTextToSteps(text: string): ParsedStep[] {
   const cleaned = stripAsciiArt(text);
-  const structured = detectSections(cleaned);
-  const lines = structured.split('\n').filter((l) => l.trim().length > 0);
+  const lines = cleaned.split('\n').filter((l) => l.trim().length > 0);
   const steps: ParsedStep[] = [];
-  const stack: { step: ParsedStep; indent: number }[] = [];
+
+  let currentParent: ParsedStep | null = null;
 
   for (const rawLine of lines) {
-    const indent = parseIndent(rawLine);
-    const lineContent = cleanLine(rawLine);
-    if (!lineContent) continue;
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
 
-    const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(lineContent);
-    const { label, description } = splitLabelDescription(afterPrefix);
-    const nodeType = explicitType ?? 'action';
+    if (isNumberedLine(trimmed)) {
+      const content = cleanNumberPrefix(trimmed);
+      const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
+      const { label, description } = splitLabelDescription(afterPrefix);
 
-    const step: ParsedStep = {
-      id: nanoid(),
-      label,
-      description,
-      nodeType,
-      children: [],
-      indent,
-    };
+      currentParent = {
+        id: nanoid(),
+        label,
+        description,
+        nodeType: explicitType ?? 'subprocess',
+        children: [],
+        indent: 0,
+      };
+      steps.push(currentParent);
+    } else if (isDashedLine(trimmed) && currentParent) {
+      const content = cleanDashPrefix(trimmed);
+      const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
+      const { label, description } = splitLabelDescription(afterPrefix);
+      const nodeType = explicitType ?? 'action';
 
-    while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
-      stack.pop();
-    }
+      currentParent.children.push({
+        id: nanoid(),
+        label,
+        description,
+        nodeType,
+        children: [],
+        indent: 1,
+      });
+    } else if (currentParent) {
+      const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(trimmed);
+      const { label, description } = splitLabelDescription(afterPrefix);
+      const nodeType = explicitType ?? 'action';
 
-    if (stack.length > 0) {
-      stack[stack.length - 1].step.children.push(step);
+      currentParent.children.push({
+        id: nanoid(),
+        label,
+        description,
+        nodeType,
+        children: [],
+        indent: 1,
+      });
     } else {
-      steps.push(step);
+      const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(trimmed);
+      const { label, description } = splitLabelDescription(afterPrefix);
+
+      currentParent = {
+        id: nanoid(),
+        label,
+        description,
+        nodeType: explicitType ?? 'action',
+        children: [],
+        indent: 0,
+      };
+      steps.push(currentParent);
     }
-    stack.push({ step, indent });
   }
 
   for (const step of steps) {
-    if (step.children.length > 0 && step.nodeType === 'action') {
+    if (step.children.length > 0 && step.nodeType !== 'subprocess') {
       step.nodeType = 'subprocess';
     }
-    step.nodeType = detectNodeType(step.label, step.children.length > 0);
   }
 
   return steps;
@@ -248,11 +235,9 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
   const rootMapId = nanoid();
   const maps: Record<string, ProcessMap> = {};
 
-  const topLevel = steps.filter((s) => s.indent === 0);
-  const phases = topLevel.length > 0 ? topLevel : steps;
+  const phases = steps;
 
   const rawOverviewNodes: Node<JourneyNodeData>[] = [];
-  const overviewEdges: Edge[] = [];
 
   phases.forEach((phase, i) => {
     const nodeId = nanoid();
@@ -291,7 +276,7 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
     });
   });
 
-  const { nodes: overviewNodes } = layoutWithDagre(rawOverviewNodes, overviewEdges, 'TB');
+  const { nodes: overviewNodes } = layoutWithDagre(rawOverviewNodes, [], 'TB');
 
   maps[rootMapId] = {
     id: rootMapId,
@@ -300,7 +285,7 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
     parentMapId: null,
     parentNodeId: null,
     nodes: overviewNodes,
-    edges: overviewEdges,
+    edges: [],
   };
 
   return {
