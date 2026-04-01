@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, type ChangeEvent } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import PasswordSettings from './PasswordSettings';
+import TextImportModal from './TextImportModal';
 
 export default function ProjectSidebar() {
   const projects = useAppStore((s) => s.projects);
@@ -14,6 +16,7 @@ export default function ProjectSidebar() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
+  const [showTextImport, setShowTextImport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreate = useCallback(() => {
@@ -117,11 +120,18 @@ export default function ProjectSidebar() {
             <button className="btn btn--primary btn--full" onClick={() => setShowNewForm(true)}>
               + New Project
             </button>
+            <button className="btn btn--secondary btn--full" onClick={() => setShowTextImport(true)}>
+              📝 Import from Text
+            </button>
             <button className="btn btn--secondary btn--full" onClick={createSampleProject}>
               ★ Load Sample
             </button>
           </div>
         )}
+      </div>
+
+      <div className="sidebar__section">
+        <PasswordSettings />
       </div>
 
       <div className="sidebar__section sidebar__section--bottom">
@@ -139,6 +149,8 @@ export default function ProjectSidebar() {
           onChange={handleFileChange}
         />
       </div>
+
+      {showTextImport && <TextImportModal onClose={() => setShowTextImport(false)} />}
     </div>
   );
 }
