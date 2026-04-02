@@ -9,7 +9,7 @@ import NodeInspector from './components/NodeInspector';
 import { useAppStore } from './store/useAppStore';
 import { useAuthStore } from './store/useAuthStore';
 import { generateNodeNumbers } from './utils/numbering';
-import { NumbersContext, ShowNumbersContext } from './contexts';
+import { NumbersContext, ShowNumbersContext, SearchTermContext } from './contexts';
 import './App.css';
 
 export default function App() {
@@ -22,6 +22,7 @@ export default function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
   const [showNumbers, setShowNumbers] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const openInspector = useCallback(() => setShowInspector(true), []);
 
@@ -39,20 +40,23 @@ export default function App() {
     <LoginGate>
       <NumbersContext.Provider value={nodeNumbers}>
         <ShowNumbersContext.Provider value={showNumbers}>
-          <ReactFlowProvider>
-            <div className="app">
-              {showSidebar && <ProjectSidebar />}
-              <div className="app__main">
-                <Toolbar
-                  showSidebar={showSidebar}
-                  onToggleSidebar={() => setShowSidebar((v) => !v)}
-                  showPalette={showPalette}
-                  onTogglePalette={() => setShowPalette((v) => !v)}
-                  showInspector={showInspector}
-                  onToggleInspector={() => setShowInspector((v) => !v)}
-                  showNumbers={showNumbers}
-                  onToggleNumbers={() => setShowNumbers((v) => !v)}
-                />
+          <SearchTermContext.Provider value={searchTerm}>
+            <ReactFlowProvider>
+              <div className="app">
+                {showSidebar && <ProjectSidebar />}
+                <div className="app__main">
+                  <Toolbar
+                    showSidebar={showSidebar}
+                    onToggleSidebar={() => setShowSidebar((v) => !v)}
+                    showPalette={showPalette}
+                    onTogglePalette={() => setShowPalette((v) => !v)}
+                    showInspector={showInspector}
+                    onToggleInspector={() => setShowInspector((v) => !v)}
+                    showNumbers={showNumbers}
+                    onToggleNumbers={() => setShowNumbers((v) => !v)}
+                    searchTerm={searchTerm}
+                    onSearchTermChange={setSearchTerm}
+                  />
                 <div className="app__workspace">
                   {activeProjectId && showPalette && <NodePalette />}
                   <FlowCanvas onNodeSelect={openInspector} />
@@ -61,6 +65,7 @@ export default function App() {
               </div>
             </div>
           </ReactFlowProvider>
+          </SearchTermContext.Provider>
         </ShowNumbersContext.Provider>
       </NumbersContext.Provider>
     </LoginGate>

@@ -795,6 +795,13 @@ body,
   font-size: 10px;
 }
 
+.jnode__highlight {
+  background: #fef08a;
+  color: #92400e;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .jnode__desc {
   font-size: 9px;
   color: var(--text-muted);

@@ -13,6 +13,8 @@ interface ToolbarProps {
   onToggleInspector: () => void;
   showNumbers: boolean;
   onToggleNumbers: () => void;
+  searchTerm: string;
+  onSearchTermChange: (term: string) => void;
 }
 
 interface SearchResult {
@@ -24,11 +26,10 @@ interface SearchResult {
   path: string;
 }
 
-export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onTogglePalette, showInspector, onToggleInspector, showNumbers, onToggleNumbers }: ToolbarProps) {
+export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onTogglePalette, showInspector, onToggleInspector, showNumbers, onToggleNumbers, searchTerm, onSearchTermChange }: ToolbarProps) {
   const project = useAppStore((s) => s.getActiveProject());
   const activeMap = useAppStore((s) => s.getActiveMap());
   const canvasRef = useRef<HTMLElement | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
 
   const getCanvas = useCallback(() => {
@@ -55,8 +56,8 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
   }, [activeMap]);
 
   const searchResults = useMemo((): SearchResult[] => {
-    if (!project || searchQuery.trim().length < 2) return [];
-    const q = searchQuery.toLowerCase();
+    if (!project || searchTerm.trim().length < 2) return [];
+    const q = searchTerm.toLowerCase();
     const results: SearchResult[] = [];
 
     for (const [mapId, map] of Object.entries(project.maps)) {
@@ -77,7 +78,7 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
     }
 
     return results.slice(0, 20);
-  }, [project, searchQuery]);
+  }, [project, searchTerm]);
 
   const handleResultClick = useCallback((result: SearchResult) => {
     const proj = project;
@@ -100,9 +101,9 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
       focusNodeId: result.nodeId,
     });
 
-    setSearchQuery('');
+    onSearchTermChange('');
     setShowSearch(false);
-  }, [project]);
+  }, [project, onSearchTermChange]);
 
   return (
     <div className="toolbar">
@@ -130,9 +131,9 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
             <div className="toolbar__search-dropdown">
               <input
                 className="toolbar__search-input"
-                placeholder="Search all nodes..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Find in all nodes..."
+                value={searchTerm}
+                onChange={(e) => onSearchTermChange(e.target.value)}
                 autoFocus
               />
               {searchResults.length > 0 && (
@@ -145,7 +146,7 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
                   ))}
                 </div>
               )}
-              {searchQuery.length >= 2 && searchResults.length === 0 && (
+              {searchTerm.length >= 2 && searchResults.length === 0 && (
                 <div className="toolbar__search-empty">No results found</div>
               )}
             </div>
