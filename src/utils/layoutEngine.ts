@@ -57,10 +57,17 @@ export function layoutWithDagre(
   return { nodes: layoutedNodes, edges };
 }
 
+const COL_WIDTH = 200;
+const ROW_HEIGHT = 80;
+const MAX_STACK = 5;
+
 export function layoutSmartFlow(
   nodes: Node<JourneyNodeData>[],
   edges: Edge[],
 ): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
+  if (nodes.length === 0) return { nodes, edges };
+  if (nodes.length <= 3) return layoutWithDagre(nodes, edges, 'LR');
+
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const childrenOf = new Map<string, string[]>();
   const parentOf = new Map<string, string>();
@@ -72,17 +79,20 @@ export function layoutSmartFlow(
   }
 
   const roots = nodes.filter((n) => !parentOf.has(n.id));
-  if (roots.length === 0 && nodes.length > 0) return layoutWithDagre(nodes, edges, 'LR');
+  if (roots.length === 0) return layoutWithDagre(nodes, edges, 'LR');
 
-  const mainPathIds = new Set<string>();
+  const mainPath: string[] = [];
+  const branchNodes = new Map<string, string[]>();
   const visited = new Set<string>();
 
-  function findMainPath(nodeId: string): void {
+  function traceMainPath(nodeId: string): void {
     if (visited.has(nodeId)) return;
     visited.add(nodeId);
-    mainPathIds.add(nodeId);
+    mainPath.push(nodeId);
 
     const children = childrenOf.get(nodeId) ?? [];
+    if (children.length === 0) return;
+
     const node = nodeMap.get(nodeId);
     const nodeData = node?.data as JourneyNodeData | undefined;
 
@@ -91,90 +101,81 @@ export function layoutSmartFlow(
         const edge = edges.find((e) => e.source === nodeId && e.target === cid);
         return !edge?.label || edge.label === 'Yes';
       });
-      if (mainChild) findMainPath(mainChild);
-    } else if (children.length === 1) {
-      findMainPath(children[0]);
-    } else if (children.length > 1) {
-      const primaryChild = children.find((cid) => {
-        const cd = (nodeMap.get(cid)?.data as JourneyNodeData | undefined);
-        return cd?.nodeType === 'decision' || cd?.nodeType === 'end';
-      }) ?? children[0];
-      findMainPath(primaryChild);
-    }
-  }
-
-  if (roots.length > 0) {
-    findMainPath(roots[0].id);
-  }
-
-  const mainPathNodes = nodes.filter((n) => mainPathIds.has(n.id));
-  const detailNodes = nodes.filter((n) => !mainPathIds.has(n.id));
-
-  const detailParent = new Map<string, string>();
-  for (const dn of detailNodes) {
-    const parent = parentOf.get(dn.id);
-    if (parent && mainPathIds.has(parent)) {
-      detailParent.set(dn.id, parent);
-    } else {
-      let ancestor = parentOf.get(dn.id);
-      while (ancestor && !mainPathIds.has(ancestor)) {
-        ancestor = parentOf.get(ancestor);
+      const otherChildren = children.filter((cid) => cid !== mainChild);
+      if (otherChildren.length > 0) {
+        branchNodes.set(nodeId, otherChildren);
       }
-      detailParent.set(dn.id, ancestor ?? (roots[0]?.id ?? ''));
+      if (mainChild) traceMainPath(mainChild);
+    } else {
+      traceMainPath(children[0]);
+      if (children.length > 1) {
+        branchNodes.set(nodeId, children.slice(1));
+      }
     }
   }
 
-  const xGap = 220;
-  const yMainPath = 0;
-  const yDetailStart = 160;
-  const yDetailGap = 90;
+  traceMainPath(roots[0].id);
 
-  const mainPositions = new Map<string, number>();
-  mainPathNodes.forEach((node, i) => {
-    mainPositions.set(node.id, i);
-  });
+  const positioned = new Map<string, { x: number; y: number }>();
+  let col = 0;
+  let stackCount = 0;
+  let isFirstInColumn = true;
 
-  const detailsByParent = new Map<string, Node<JourneyNodeData>[]>();
-  for (const dn of detailNodes) {
-    const pid = detailParent.get(dn.id) ?? '';
-    if (!detailsByParent.has(pid)) detailsByParent.set(pid, []);
-    detailsByParent.get(pid)!.push(dn);
-  }
+  for (const nodeId of mainPath) {
+    const node = nodeMap.get(nodeId);
+    if (!node) continue;
+    const data = node.data as JourneyNodeData;
+    const isDecision = data.nodeType === 'decision';
+    const isTerminal = data.nodeType === 'start' || data.nodeType === 'end';
 
-  const positionedNodes: Node<JourneyNodeData>[] = [];
-
-  for (const node of mainPathNodes) {
-    const col = mainPositions.get(node.id) ?? 0;
-    const d = node.data as JourneyNodeData;
-    const dim = getNodeDimensions(d.nodeType);
-    positionedNodes.push({
-      ...node,
-      position: {
-        x: col * xGap,
-        y: yMainPath + (d.nodeType === 'decision' ? -20 : 0),
-      },
-    });
-
-    const details = detailsByParent.get(node.id) ?? [];
-    details.forEach((dn, di) => {
-      positionedNodes.push({
-        ...dn,
-        position: {
-          x: col * xGap + (dim.width - NODE_WIDTH) / 2,
-          y: yDetailStart + di * yDetailGap,
-        },
-      });
-    });
-  }
-
-  for (const dn of detailNodes) {
-    if (!positionedNodes.find((n) => n.id === dn.id)) {
-      positionedNodes.push({
-        ...dn,
-        position: { x: 0, y: yDetailStart + 200 },
-      });
+    if (isDecision || isTerminal) {
+      if (!isFirstInColumn && stackCount > 0) {
+        col++;
+      }
+      positioned.set(nodeId, { x: col * COL_WIDTH, y: 0 });
+      stackCount = 0;
+      isFirstInColumn = true;
+      col++;
+    } else {
+      if (stackCount >= MAX_STACK) {
+        col++;
+        stackCount = 0;
+      }
+      positioned.set(nodeId, { x: col * COL_WIDTH, y: (isFirstInColumn ? 0 : stackCount) * ROW_HEIGHT });
+      if (isFirstInColumn) {
+        isFirstInColumn = false;
+        stackCount = 1;
+      } else {
+        stackCount++;
+      }
     }
   }
+
+  for (const [parentId, branchIds] of branchNodes) {
+    const parentPos = positioned.get(parentId);
+    if (!parentPos) continue;
+
+    branchIds.forEach((bid, bi) => {
+      if (!positioned.has(bid)) {
+        positioned.set(bid, {
+          x: parentPos.x,
+          y: parentPos.y + (bi + 1) * ROW_HEIGHT + ROW_HEIGHT,
+        });
+      }
+    });
+  }
+
+  for (const node of nodes) {
+    if (!positioned.has(node.id)) {
+      positioned.set(node.id, { x: col * COL_WIDTH, y: 0 });
+      col++;
+    }
+  }
+
+  const positionedNodes = nodes.map((node) => ({
+    ...node,
+    position: positioned.get(node.id) ?? { x: 0, y: 0 },
+  }));
 
   return { nodes: positionedNodes, edges };
 }
