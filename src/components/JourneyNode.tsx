@@ -39,6 +39,9 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const isTerminal = isStart || isEnd;
   const chapterNum = showNumbers ? nodeNumbers.get(id) : null;
 
+  const focusNodeId = useAppStore((s) => s.focusNodeId);
+  const isFocused = focusNodeId === id;
+
   const stepCount = isSubprocess && nodeData.subMapId && project
     ? project.maps[nodeData.subMapId]?.nodes.length ?? 0
     : 0;
@@ -63,7 +66,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
     return (
       <div
         onClick={handleClick}
-        className={`jnode jnode--diamond ${selected ? 'jnode--selected' : ''}`}
+        className={`jnode jnode--diamond ${selected ? 'jnode--selected' : ''} ${isFocused ? 'jnode--focused' : ''}`}
         style={{ borderColor: color }}
         title={nodeData.description}
       >
@@ -82,7 +85,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
     <div
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      className={`jnode ${isSubprocess ? 'jnode--subprocess' : 'jnode--rect'} ${selected ? 'jnode--selected' : ''}`}
+      className={`jnode ${isSubprocess ? 'jnode--subprocess' : 'jnode--rect'} ${selected ? 'jnode--selected' : ''} ${isFocused ? 'jnode--focused' : ''}`}
       style={{ borderColor: color, background: `${color}12` }}
     >
       {chapterNum && <span className="jnode__number">{chapterNum}</span>}

@@ -27,6 +27,7 @@ interface AppState {
   activeMapId: string | null;
   breadcrumb: string[];
   selectedNodeId: string | null;
+  focusNodeId: string | null;
 
   // Derived helpers
   getActiveProject: () => ProcessMapProject | null;
@@ -96,6 +97,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeMapId: null,
   breadcrumb: [],
   selectedNodeId: null,
+  focusNodeId: null,
 
   getActiveProject() {
     const { projects, activeProjectId } = get();

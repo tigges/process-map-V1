@@ -97,6 +97,7 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
       activeMapId: result.mapId,
       breadcrumb,
       selectedNodeId: result.nodeId,
+      focusNodeId: result.nodeId,
     });
 
     setSearchQuery('');

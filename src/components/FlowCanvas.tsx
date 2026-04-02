@@ -16,13 +16,14 @@ function FlowPane({
   map, isPreview, onNodeSelect,
 }: { map: ProcessMap; isPreview?: boolean; onNodeSelect?: () => void }) {
   const rfRef = useRef<ReactFlowInstance<Node<JourneyNodeData>, Edge> | null>(null);
-  const { fitView } = useReactFlow();
+  const { fitView, setCenter } = useReactFlow();
   const onNodesChange = useAppStore((s) => s.onNodesChange);
   const onEdgesChange = useAppStore((s) => s.onEdgesChange);
   const onConnect = useAppStore((s) => s.onConnect);
   const addNode = useAppStore((s) => s.addNode);
   const setSelectedNode = useAppStore((s) => s.setSelectedNode);
   const persist = useAppStore((s) => s.persist);
+  const focusNodeId = useAppStore((s) => s.focusNodeId);
 
   const nodes = useMemo(() => map.nodes, [map]);
   const edges = useMemo(() => map.edges, [map]);
@@ -31,6 +32,17 @@ function FlowPane({
     const t = setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 50);
     return () => clearTimeout(t);
   }, [map.id, fitView]);
+
+  useEffect(() => {
+    if (!focusNodeId || isPreview) return;
+    const node = map.nodes.find((n) => n.id === focusNodeId);
+    if (!node) return;
+    const t = setTimeout(() => {
+      setCenter(node.position.x + 80, node.position.y + 30, { zoom: 1.5, duration: 500 });
+      useAppStore.setState({ focusNodeId: null });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [focusNodeId, map.nodes, setCenter, isPreview]);
 
   const onInit = useCallback((inst: ReactFlowInstance<Node<JourneyNodeData>, Edge>) => {
     rfRef.current = inst;
