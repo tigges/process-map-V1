@@ -13,11 +13,25 @@ export interface Category {
 
 interface CategoryBuilderProps {
   suggestedCategories: string[];
+  factsDetected: boolean;
+  includeFactsCategory: boolean;
+  allowNewCategories: boolean;
+  onIncludeFactsChange: (value: boolean) => void;
+  onAllowNewCategoriesChange: (value: boolean) => void;
   onConfirm: (categories: Category[]) => void;
   onBack: () => void;
 }
 
-export default function CategoryBuilder({ suggestedCategories, onConfirm, onBack }: CategoryBuilderProps) {
+export default function CategoryBuilder({
+  suggestedCategories,
+  factsDetected,
+  includeFactsCategory,
+  allowNewCategories,
+  onIncludeFactsChange,
+  onAllowNewCategoriesChange,
+  onConfirm,
+  onBack,
+}: CategoryBuilderProps) {
   const [categories, setCategories] = useState<Category[]>(
     suggestedCategories.map((name) => ({ id: nanoid(), name, description: '', steps: [] })),
   );
@@ -67,9 +81,28 @@ export default function CategoryBuilder({ suggestedCategories, onConfirm, onBack
   return (
     <div className="cat-builder">
       <p className="modal__hint">
-        Define the top-level categories for your process map. These become the overview nodes.
-        Reorder them to set chapter numbering (1, 2, 3...).
+        Define category policy and top-level categories. Reorder to set chapter numbering.
       </p>
+      <div className="cat-builder__policy">
+        <label className="cat-builder__policy-item">
+          <input
+            type="checkbox"
+            checked={includeFactsCategory}
+            onChange={(e) => onIncludeFactsChange(e.target.checked)}
+            disabled={!factsDetected}
+          />
+          <span>Include Facts & Context category</span>
+          {!factsDetected && <em className="cat-builder__policy-note">No fact candidates detected</em>}
+        </label>
+        <label className="cat-builder__policy-item">
+          <input
+            type="checkbox"
+            checked={allowNewCategories}
+            onChange={(e) => onAllowNewCategoriesChange(e.target.checked)}
+          />
+          <span>Allow AI to propose new categories during auto-allocation</span>
+        </label>
+      </div>
       <div className="cat-builder__list">
         {categories.map((cat, i) => (
           <div key={cat.id} className="cat-builder__item">

@@ -48,6 +48,27 @@ IMPORTANT: Your response must start with "1." — do not include ANY text before
 
 Now convert this document:`;
 
+const ALLOCATION_SYSTEM_PROMPT = `You assign process steps to categories.
+
+Rules:
+- Return ONLY valid JSON, no markdown fences, no prose.
+- Output schema:
+{
+  "allocations": [
+    {
+      "id": "step-id",
+      "category": "exact category name",
+      "confidence": 0.0,
+      "reason": "short reason"
+    }
+  ]
+}
+- category must match one of the provided categories exactly.
+- confidence must be a number between 0 and 1.
+- reason must be concise (<= 20 words).
+- If uncertain, still choose the best category but lower confidence.
+- Treat facts/statements/definitions/constraints as context-oriented where applicable.`;
+
 export function getManualPrompt(): string {
   return `Copy this prompt into Claude, then paste your document after the line that says "PASTE DOCUMENT BELOW":
 
@@ -58,7 +79,7 @@ ${SYSTEM_PROMPT}
 [Replace this line with your document text]`;
 }
 
-export async function smartParse(text: string): Promise<string> {
+async function claudeText(systemPrompt: string, text: string, maxTokens = 4096): Promise<string> {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Claude API key not configured');
 
@@ -72,8 +93,8 @@ export async function smartParse(text: string): Promise<string> {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      max_tokens: maxTokens,
+      system: systemPrompt,
       messages: [{ role: 'user', content: text }],
     }),
   });
@@ -88,4 +109,66 @@ export async function smartParse(text: string): Promise<string> {
   const textBlock = data.content.find((c) => c.type === 'text');
   if (!textBlock) throw new Error('No text in Claude response');
   return textBlock.text;
+}
+
+export async function smartParse(text: string): Promise<string> {
+  return claudeText(SYSTEM_PROMPT, text, 4096);
+}
+
+export interface AllocationStepInput {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface AllocationSuggestion {
+  id: string;
+  category: string;
+  confidence: number;
+  reason: string;
+}
+
+interface AllocationResponse {
+  allocations: AllocationSuggestion[];
+}
+
+function tryParseJson<T>(raw: string): T | null {
+  const trimmed = raw.trim();
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1)) as T;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+export async function smartAllocateSteps(
+  categories: string[],
+  steps: AllocationStepInput[],
+): Promise<AllocationSuggestion[]> {
+  if (categories.length === 0 || steps.length === 0) return [];
+  const userPayload = JSON.stringify({ categories, steps });
+  const raw = await claudeText(ALLOCATION_SYSTEM_PROMPT, userPayload, 2200);
+  const parsed = tryParseJson<AllocationResponse>(raw);
+  if (!parsed || !Array.isArray(parsed.allocations)) {
+    throw new Error('AI allocation response was not valid JSON');
+  }
+  const validCategorySet = new Set(categories);
+  const stepIdSet = new Set(steps.map((s) => s.id));
+  return parsed.allocations
+    .filter((a) => stepIdSet.has(a.id) && validCategorySet.has(a.category))
+    .map((a) => ({
+      id: a.id,
+      category: a.category,
+      confidence: Number.isFinite(a.confidence) ? Math.max(0, Math.min(1, a.confidence)) : 0,
+      reason: (a.reason || '').slice(0, 140),
+    }));
 }

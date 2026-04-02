@@ -45,6 +45,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [wasAiParsed, setWasAiParsed] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [allowAiCategoryExpansion, setAllowAiCategoryExpansion] = useState(false);
+  const [alwaysIncludeFacts, setAlwaysIncludeFacts] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const aiAvailable = hasApiKey();
@@ -55,8 +57,9 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     const base = parsedSteps
       .filter((s) => s.nodeType === 'subprocess' || s.children.length > 0)
       .map((s) => s.label);
-    return factCount > 0 ? ensureFactsCategory(base) : base;
-  }, [parsedSteps, factCount]);
+    if (alwaysIncludeFacts || factCount > 0) return ensureFactsCategory(base);
+    return base;
+  }, [parsedSteps, factCount, alwaysIncludeFacts]);
 
   const flatSteps = useMemo(() => {
     const flat: ParsedStep[] = [];
@@ -128,7 +131,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
 
   const handleCategoriesConfirm = useCallback((cats: Category[]) => {
     const names = cats.map((c) => c.name);
-    const withFacts = factCount > 0 && !names.includes(FACTS_CATEGORY_NAME)
+    const shouldInjectFacts = (alwaysIncludeFacts || factCount > 0) && !names.includes(FACTS_CATEGORY_NAME);
+    const withFacts = shouldInjectFacts
       ? [...cats, {
           id: crypto.randomUUID(),
           name: FACTS_CATEGORY_NAME,
@@ -140,13 +144,18 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       : cats;
     setCategories(withFacts);
     setWizardStep('allocate');
-  }, [factCount]);
+  }, [alwaysIncludeFacts, factCount]);
 
   const handleAllocateConfirm = useCallback(
-    (cats: Category[], graveyard: ParsedStep[]) => {
-      const allocatedCats = cats.map((c) => ({ name: c.name, steps: c.steps }));
-      const project = allocatedToProject(allocatedCats, graveyard, projectName || 'Imported Journey', false);
+    (cats: Category[], graveyard: ParsedStep[], unallocated: ParsedStep[]) => {
+      // Safety-first: unresolved items are never silently dropped.
+      const allGraveyard = [...graveyard, ...unallocated];
+      const allocatedCats = cats.map((c) => ({ name: c.name, kind: c.kind, steps: c.steps }));
+      const project = allocatedToProject(allocatedCats, allGraveyard, projectName || 'Imported Journey', false);
       importProject(JSON.stringify(project));
+      if (unallocated.length > 0) {
+        console.info(`Moved ${unallocated.length} unallocated steps to Unclassified during import.`);
+      }
       onClose();
     },
     [projectName, importProject, onClose],
@@ -346,11 +355,39 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
           )}
 
           {wizardStep === 'categories' && (
-            <CategoryBuilder
-              suggestedCategories={suggestedCategories}
-              onConfirm={handleCategoriesConfirm}
-              onBack={() => setWizardStep('review')}
-            />
+            <>
+              <p className="modal__hint">
+                Set category policy before allocation. AI pre-allocation will respect this setup and focus manual review on uncertain items.
+              </p>
+              <div className="cat-policy">
+                <label className="modal__toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={alwaysIncludeFacts}
+                    onChange={(e) => setAlwaysIncludeFacts(e.target.checked)}
+                  />
+                  <span>Always include "{FACTS_CATEGORY_NAME}"</span>
+                </label>
+                <label className="modal__toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={allowAiCategoryExpansion}
+                    onChange={(e) => setAllowAiCategoryExpansion(e.target.checked)}
+                  />
+                  <span>Allow AI to suggest new categories (coming next)</span>
+                </label>
+              </div>
+              <CategoryBuilder
+                suggestedCategories={suggestedCategories}
+                factsDetected={factCount > 0}
+                includeFactsCategory={alwaysIncludeFacts}
+                allowNewCategories={allowAiCategoryExpansion}
+                onIncludeFactsChange={setAlwaysIncludeFacts}
+                onAllowNewCategoriesChange={setAllowAiCategoryExpansion}
+                onConfirm={handleCategoriesConfirm}
+                onBack={() => setWizardStep('review')}
+              />
+            </>
           )}
 
           {wizardStep === 'allocate' && (

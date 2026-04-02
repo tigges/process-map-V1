@@ -1,27 +1,57 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { ParsedStep } from '../utils/textParser';
 import type { Category } from './CategoryBuilder';
-import { hasApiKey, smartParse } from '../utils/claudeApi';
-import { parseTextToSteps } from '../utils/textParser';
+import { hasApiKey, smartAllocateSteps } from '../utils/claudeApi';
 
 interface StepAllocatorProps {
   categories: Category[];
   steps: ParsedStep[];
-  onConfirm: (categories: Category[], graveyard: ParsedStep[]) => void;
+  onConfirm: (categories: Category[], graveyard: ParsedStep[], unallocated: ParsedStep[]) => void;
   onBack: () => void;
 }
 
+interface ReviewItem {
+  step: ParsedStep;
+  targetCategoryId: string;
+  confidence: number;
+  reason: string;
+}
+
+const HIGH_CONFIDENCE = 0.8;
+const REVIEW_CONFIDENCE = 0.5;
+
 export default function StepAllocator({ categories: initialCats, steps, onConfirm, onBack }: StepAllocatorProps) {
-  const [cats, setCats] = useState<Category[]>(initialCats);
+  const [cats, setCats] = useState<Category[]>(initialCats.map((c) => ({ ...c, steps: [...c.steps] })));
   const factsCategoryId = initialCats.find((c) => c.kind === 'facts')?.id ?? null;
-  const [unallocated, setUnallocated] = useState<ParsedStep[]>(() => {
-    const allocatedIds = new Set(initialCats.flatMap((c) => c.steps.map((s) => s.id)));
-    return steps.filter((s) => !allocatedIds.has(s.id));
-  });
+
   const [graveyard, setGraveyard] = useState<ParsedStep[]>([]);
   const [dragStep, setDragStep] = useState<ParsedStep | null>(null);
   const [dragOverCat, setDragOverCat] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
+  const [autoAccepted, setAutoAccepted] = useState<ParsedStep[]>([]);
+
+  const [unallocated, setUnallocated] = useState<ParsedStep[]>(() => {
+    const allocatedIds = new Set(initialCats.flatMap((c) => c.steps.map((s) => s.id)));
+    return steps.filter((s) => !allocatedIds.has(s.id));
+  });
+
+  const allCategoryIds = useMemo(() => new Set(cats.map((c) => c.id)), [cats]);
+
+  const removeStepFromAllBuckets = useCallback((stepId: string) => {
+    setCats((prev) => prev.map((c) => ({ ...c, steps: c.steps.filter((s) => s.id !== stepId) })));
+    setUnallocated((prev) => prev.filter((s) => s.id !== stepId));
+    setGraveyard((prev) => prev.filter((s) => s.id !== stepId));
+    setReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
+    setAutoAccepted((prev) => prev.filter((s) => s.id !== stepId));
+  }, []);
+
+  const placeStepInCategory = useCallback((step: ParsedStep, catId: string) => {
+    removeStepFromAllBuckets(step.id);
+    setCats((prev) => prev.map((c) => (
+      c.id === catId ? { ...c, steps: [...c.steps, step] } : c
+    )));
+  }, [removeStepFromAllBuckets]);
 
   const handleDragStart = useCallback((step: ParsedStep) => {
     setDragStep(step);
@@ -29,64 +59,105 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
 
   const handleDropOnCategory = useCallback((catId: string) => {
     if (!dragStep) return;
-    setUnallocated((prev) => prev.filter((s) => s.id !== dragStep.id));
-    setCats((prev) => prev.map((c) => {
-      if (c.id === catId) return { ...c, steps: [...c.steps.filter((s) => s.id !== dragStep.id), dragStep] };
-      return { ...c, steps: c.steps.filter((s) => s.id !== dragStep.id) };
-    }));
-    setGraveyard((prev) => prev.filter((s) => s.id !== dragStep.id));
+    placeStepInCategory(dragStep, catId);
     setDragStep(null);
     setDragOverCat(null);
-  }, [dragStep]);
+  }, [dragStep, placeStepInCategory]);
 
   const handleDropOnUnallocated = useCallback(() => {
     if (!dragStep) return;
-    setCats((prev) => prev.map((c) => ({ ...c, steps: c.steps.filter((s) => s.id !== dragStep.id) })));
-    setGraveyard((prev) => prev.filter((s) => s.id !== dragStep.id));
-    setUnallocated((prev) => prev.some((s) => s.id === dragStep.id) ? prev : [...prev, dragStep]);
+    removeStepFromAllBuckets(dragStep.id);
+    setUnallocated((prev) => [...prev, dragStep]);
     setDragStep(null);
-  }, [dragStep]);
+  }, [dragStep, removeStepFromAllBuckets]);
 
   const handleDropOnGraveyard = useCallback(() => {
     if (!dragStep) return;
-    setUnallocated((prev) => prev.filter((s) => s.id !== dragStep.id));
-    setCats((prev) => prev.map((c) => ({ ...c, steps: c.steps.filter((s) => s.id !== dragStep.id) })));
-    setGraveyard((prev) => prev.some((s) => s.id === dragStep.id) ? prev : [...prev, dragStep]);
+    removeStepFromAllBuckets(dragStep.id);
+    setGraveyard((prev) => [...prev, dragStep]);
     setDragStep(null);
-  }, [dragStep]);
+  }, [dragStep, removeStepFromAllBuckets]);
 
   const handleAutoAllocate = useCallback(async () => {
-    if (!hasApiKey()) return;
+    if (!hasApiKey() || unallocated.length === 0) return;
     setAiLoading(true);
     try {
-      const catNames = cats.map((c) => c.name).join(', ');
-      const stepLabels = unallocated.map((s) => s.label).join('\n');
-      const prompt = `Given these categories: ${catNames}\n\nAllocate each step to the best matching category. Output ONLY numbered lines matching the category names, with steps as sub-items:\n\n${stepLabels}\n\nOutput format:\n1. CategoryName\n- step label\n- step label\n2. CategoryName\n- step label`;
-      const result = await smartParse(prompt);
-      const parsed = parseTextToSteps(result);
-      const newCats = [...cats];
-      const remaining = [...unallocated];
+      const allocation = await smartAllocateSteps(
+        cats.map((c) => c.name),
+        unallocated.map((s) => ({ id: s.id, label: s.label, description: s.description })),
+      );
+      const byStepId = new Map(unallocated.map((s) => [s.id, s]));
+      const byCategoryName = new Map(cats.map((c) => [c.name.toLowerCase(), c]));
 
-      for (const parsedCat of parsed) {
-        const matchingCat = newCats.find((c) => c.name.toLowerCase().includes(parsedCat.label.toLowerCase()) || parsedCat.label.toLowerCase().includes(c.name.toLowerCase()));
-        if (!matchingCat) continue;
-        for (const child of parsedCat.children) {
-          const matchStep = remaining.find((s) => s.label.toLowerCase().includes(child.label.toLowerCase()) || child.label.toLowerCase().includes(s.label.toLowerCase()));
-          if (matchStep) {
-            matchingCat.steps.push(matchStep);
-            remaining.splice(remaining.indexOf(matchStep), 1);
-          }
+      const nextReview: ReviewItem[] = [];
+      const accepted: ParsedStep[] = [];
+      const unresolved: ParsedStep[] = [];
+
+      for (const item of allocation) {
+        const step = byStepId.get(item.id);
+        if (!step) continue;
+
+        const direct = byCategoryName.get(item.category.toLowerCase());
+        const fallback = cats.find((c) => c.name.toLowerCase().includes(item.category.toLowerCase()) || item.category.toLowerCase().includes(c.name.toLowerCase()));
+        const target = direct ?? fallback;
+
+        if (!target) {
+          unresolved.push(step);
+          continue;
         }
+
+        if (item.confidence >= HIGH_CONFIDENCE) {
+          placeStepInCategory(step, target.id);
+          accepted.push(step);
+          continue;
+        }
+
+        if (item.confidence >= REVIEW_CONFIDENCE) {
+          nextReview.push({
+            step,
+            targetCategoryId: target.id,
+            confidence: item.confidence,
+            reason: item.reason || 'Low confidence allocation',
+          });
+          continue;
+        }
+
+        unresolved.push(step);
       }
 
-      setCats(newCats);
-      setUnallocated(remaining);
+      const assignedIds = new Set([
+        ...accepted.map((s) => s.id),
+        ...nextReview.map((r) => r.step.id),
+        ...unresolved.map((s) => s.id),
+      ]);
+
+      const leftovers = unallocated.filter((s) => !assignedIds.has(s.id));
+      const combinedUnallocated = [...unresolved, ...leftovers];
+
+      setAutoAccepted(accepted);
+      setReviewQueue(nextReview);
+      setUnallocated(combinedUnallocated);
     } catch (err) {
       console.error('Auto-allocate failed:', err);
     } finally {
       setAiLoading(false);
     }
-  }, [cats, unallocated]);
+  }, [cats, placeStepInCategory, unallocated]);
+
+  const resolveReviewItem = useCallback((stepId: string, targetCategoryId: string) => {
+    const item = reviewQueue.find((r) => r.step.id === stepId);
+    if (!item) return;
+    if (!allCategoryIds.has(targetCategoryId)) return;
+    placeStepInCategory(item.step, targetCategoryId);
+    setReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
+  }, [allCategoryIds, placeStepInCategory, reviewQueue]);
+
+  const sendReviewToUnallocated = useCallback((stepId: string) => {
+    const item = reviewQueue.find((r) => r.step.id === stepId);
+    if (!item) return;
+    removeStepFromAllBuckets(stepId);
+    setUnallocated((prev) => [...prev, item.step]);
+  }, [removeStepFromAllBuckets, reviewQueue]);
 
   const totalAllocated = cats.reduce((sum, c) => sum + c.steps.length, 0);
   const factAllocated = factsCategoryId
@@ -96,10 +167,12 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
   return (
     <div className="allocator">
       <p className="modal__hint">
-        Drag steps from the left into categories on the right. Order within a category sets the flow sequence.
+        AI auto-allocates high-confidence steps. You only review uncertain items.
       </p>
       <div className="allocator__stats">
         <span className="tree-review__stat">{unallocated.length} unallocated</span>
+        <span className="tree-review__stat">{reviewQueue.length} needs review</span>
+        <span className="tree-review__stat">{autoAccepted.length} auto-accepted</span>
         <span className="tree-review__stat">{totalAllocated} allocated</span>
         <span className="tree-review__stat">{factAllocated} facts allocated</span>
         <span className="tree-review__stat">{graveyard.length} discarded</span>
@@ -109,6 +182,39 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
           </button>
         )}
       </div>
+
+      {reviewQueue.length > 0 && (
+        <div className="allocator__review-queue">
+          <h4 className="allocator__col-title">Needs Review ({reviewQueue.length})</h4>
+          <div className="allocator__review-list">
+            {reviewQueue.map((item) => (
+              <div key={item.step.id} className="allocator__review-item">
+                <div className="allocator__review-main">
+                  <span className="allocator__step-label">{item.step.label}</span>
+                  <span className="allocator__review-reason">{item.reason}</span>
+                </div>
+                <div className="allocator__review-actions">
+                  <span className="allocator__review-confidence">{Math.round(item.confidence * 100)}%</span>
+                  <select
+                    className="allocator__review-select"
+                    value={item.targetCategoryId}
+                    onChange={(e) => resolveReviewItem(item.step.id, e.target.value)}
+                  >
+                    <option value="">Move to...</option>
+                    {cats.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button className="btn btn--ghost btn--sm" onClick={() => sendReviewToUnallocated(item.step.id)}>
+                    Keep Unallocated
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="allocator__columns">
         <div
           className="allocator__left"
@@ -129,10 +235,10 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
                 {step.semanticKind !== 'fact' && (step.semanticScore ?? 0) >= 0.45 && (
                   <span className="allocator__fact-badge allocator__fact-badge--soft">Maybe fact</span>
                 )}
-                <span className="allocator__step-type">{step.nodeType}</span>
+                <span className={`allocator__step-type ${step.semanticKind === 'fact' ? 'allocator__step-type--fact' : ''}`}>{step.nodeType}</span>
               </div>
             ))}
-            {unallocated.length === 0 && <p className="allocator__empty">All steps allocated!</p>}
+            {unallocated.length === 0 && <p className="allocator__empty">All steps resolved!</p>}
           </div>
           <div
             className="allocator__graveyard"
@@ -186,8 +292,8 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
       </div>
       <div className="modal__footer" style={{ borderTop: 'none', padding: '12px 0 0' }}>
         <button className="btn btn--ghost" onClick={onBack}>← Back</button>
-        <button className="btn btn--primary" onClick={() => onConfirm(cats, graveyard)} disabled={totalAllocated === 0}>
-          Import ({totalAllocated} steps in {cats.filter((c) => c.steps.length > 0).length} categories) →
+        <button className="btn btn--primary" onClick={() => onConfirm(cats, graveyard, unallocated)} disabled={totalAllocated === 0 && unallocated.length === 0 && graveyard.length === 0}>
+          Import ({totalAllocated} allocated, {reviewQueue.length} review, {unallocated.length} unallocated) →
         </button>
       </div>
     </div>

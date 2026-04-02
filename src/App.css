@@ -1931,6 +1931,69 @@ body,
   padding-top: 8px;
 }
 
+.allocator__review-queue {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  margin-bottom: 12px;
+  background: #f8fafc;
+}
+
+.allocator__review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.allocator__review-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 8px;
+}
+
+.allocator__review-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.allocator__review-reason {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.allocator__review-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.allocator__review-confidence {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+
+.allocator__review-select {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 4px 6px;
+  background: white;
+}
+
 /* ===== Cross-reference links ===== */
 .jnode__xref {
   display: inline;
