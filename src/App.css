@@ -910,6 +910,21 @@ body,
   margin-top: -8px;
 }
 
+.modal__loading {
+  font-size: 13px;
+  color: var(--primary);
+  background: #eef2ff;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .modal__footer {
   display: flex;
   justify-content: flex-end;
