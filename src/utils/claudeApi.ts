@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'processmap-claude-api-key';
-const MODEL = 'claude-haiku-4-20250414';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 export function getApiKey(): string {
   return localStorage.getItem(STORAGE_KEY) ?? '';
