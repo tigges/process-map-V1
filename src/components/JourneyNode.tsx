@@ -21,6 +21,13 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
     setSelectedNode(id);
   }, [id, setSelectedNode]);
 
+  const handleOpenClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (nodeData.subMapId) {
+      navigateToMap(nodeData.subMapId);
+    }
+  }, [nodeData, navigateToMap]);
+
   const color = nodeData.color || config.color;
   const isSubprocess = nodeData.nodeType === 'subprocess';
   const isDecision = nodeData.nodeType === 'decision';
@@ -80,10 +87,10 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
         {nodeData.description && (
           <div className="jnode__desc">{nodeData.description}</div>
         )}
-        {isSubprocess && (
-          <div className="jnode__hint" style={{ color }}>
-            {stepCount > 0 ? `${stepCount} steps` : 'Open'}
-          </div>
+        {isSubprocess && nodeData.subMapId && (
+          <button className="jnode__open-btn" onClick={handleOpenClick} style={{ color }}>
+            {stepCount > 0 ? `Open ${stepCount} steps →` : 'Open →'}
+          </button>
         )}
       </div>
     </div>
