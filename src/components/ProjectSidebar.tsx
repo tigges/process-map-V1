@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, type ChangeEvent } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import PasswordSettings from './PasswordSettings';
+import ApiKeySettings from './ApiKeySettings';
 import TextImportModal from './TextImportModal';
 
 export default function ProjectSidebar() {
@@ -149,6 +150,10 @@ export default function ProjectSidebar() {
             </button>
           </div>
         )}
+      </div>
+
+      <div className="sidebar__section">
+        <ApiKeySettings />
       </div>
 
       <div className="sidebar__section">
