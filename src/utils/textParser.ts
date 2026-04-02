@@ -64,6 +64,20 @@ function cleanupText(text: string): string {
   const lines = text.split('\n');
   const cleaned: string[] = [];
   let inQuote = false;
+  let foundFirstNumbered = false;
+
+  const promptPatterns = [
+    /^output (format|rules)/i, /^available type tags/i, /^critical rules/i,
+    /^example( output)?:/i, /^important:/i, /^now convert/i,
+    /^you are a process map/i, /^convert (the |this |attached)/i,
+    /^paste (your |document)/i, /^--- paste document/i,
+    /^copy this prompt/i, /^\[replace this line/i,
+    /^(top-level items|sub-items start|aim for \d)/i,
+    /^\[action\] —/i, /^\[decision\] —/i, /^\[subprocess\] —/i,
+    /^\[start\] —/i, /^\[end\] —/i,
+    /^tags:/i, /^use "label:/i, /^identify actor/i,
+    /^for (decisions|checks)/i, /^omit junk/i, /^remove all non/i,
+  ];
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -71,6 +85,19 @@ function cleanupText(text: string): string {
     if (SEPARATOR_LINE.test(trimmed)) continue;
     if (BOX_LINE.test(trimmed)) continue;
     if (PAGE_MARKER.test(trimmed)) continue;
+    if (/^---\s*$/.test(trimmed)) continue;
+
+    if (!foundFirstNumbered) {
+      if (/^\d+[.)]\s/.test(trimmed)) {
+        foundFirstNumbered = true;
+      } else {
+        let isPrompt = false;
+        for (const pattern of promptPatterns) {
+          if (pattern.test(trimmed)) { isPrompt = true; break; }
+        }
+        if (isPrompt) continue;
+      }
+    }
 
     const processed = trimmed
       .replace(ASCII_ART, ' ')

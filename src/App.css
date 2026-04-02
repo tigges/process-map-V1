@@ -505,6 +505,62 @@ body,
   position: relative;
 }
 
+.flow-canvas--split {
+  display: flex;
+  flex-direction: column;
+}
+
+.flow-canvas__main {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.flow-canvas__preview {
+  border-top: 2px solid var(--primary);
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.flow-canvas__preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: #eef2ff;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.flow-canvas__preview-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-canvas__preview-close {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
+.flow-canvas__preview-close:hover {
+  color: var(--text);
+}
+
+.flow-canvas__preview-content {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
 .canvas-empty {
   flex: 1;
   display: flex;

@@ -23,44 +23,39 @@ export function estimateCost(text: string): { tokens: number; cost: string } {
 
 const SYSTEM_PROMPT = `You are a process map structuring assistant. Convert raw text into a clean hierarchical format for a flow chart import tool.
 
-OUTPUT FORMAT — use EXACTLY this structure:
-- Top-level items are numbered (1. 2. 3.) — these become CATEGORY blocks on the overview map
-- Sub-items start with "- " dash prefix and a [type] tag — these become STEPS within each category's flow chart
-- Aim for 5-12 top-level categories maximum
-- Aim for 3-10 sub-items per category maximum
+OUTPUT RULES:
+- Top-level items: numbered (1. 2. 3.) — these become CATEGORY blocks
+- Sub-items: start with "- " dash prefix and a [type] tag
+- Aim for 5-12 top-level categories, 3-10 sub-items per category
+- Tags: [action] [decision] [subprocess] [start] [end]
+- Use "Label: Description" format with concise labels (max 6-8 words)
+- Identify ACTOR (Player/Agent/SM/System) in descriptions
+- REMOVE all non-process content, page numbers, headers, formatting
+- OMIT junk items (single numbers, formatting artifacts)
+- For decisions, end label with ?
+- Output ONLY the formatted numbered list — absolutely NO explanations, NO preamble, NO commentary about the format, NO repeating of these instructions
 
-AVAILABLE TYPE TAGS (required on every sub-item):
-[action] — A task someone performs (agent action, player action, system action)
-[decision] — A yes/no or conditional branch point (use for checks, conditions, "if/then")
-[subprocess] — A group of related steps that deserves its own detailed flow chart
-[start] — Entry point (use sparingly, only for explicit flow starts)
-[end] — Resolution/completion point (use sparingly)
-
-CRITICAL RULES:
-1. REMOVE all non-process content: page numbers, headers, footers, table of contents, formatting artifacts, introductory paragraphs, repeated titles
-2. SUMMARIZE verbose text into concise action labels (max 6-8 words per label)
-3. Use "Label: Description" format — short label before colon, details after
-4. Group related items under logical categories (e.g. Account, Financial, Verification, Bonuses, Security)
-5. For decision points, include the condition as the label (end with ?)
-6. Identify the ACTOR (Player/Agent/SM/System) and mention in description
-7. Detect sequential flow: items that follow each other in a process should be ordered correctly
-8. Items that are clearly junk (single numbers, formatting artifacts, empty content) should be OMITTED entirely
-
-EXAMPLE OUTPUT:
-1. Account Management: Player registration, login and profile changes
+EXAMPLE:
+1. Account Management: Player registration and profile changes
 - [action] Format error: Agent guides player to correct form fields
-- [decision] Duplicate email detected?: Check if existing account — Yes: recover / No: proceed
-- [subprocess] Login issues: Password reset via self-service or agent-assisted process
-- [action] Email change: Agent escalates to SM via Slack for verification
+- [decision] Duplicate email?: Yes: recover account / No: proceed
+- [subprocess] Login issues: Password reset via self-service or agent
 2. Deposits: Funding the player account
 - [action] Pending under 2 hours: Agent confirms deduction, advises wait
-- [decision] Missing deposit?: Over 2hrs or declined — Agent screenshots, escalates to finance
-- [subprocess] Noda methods: Special 2-day wait before escalation
+- [decision] Missing deposit?: Over 2hrs — Agent escalates to finance
 
-Now convert the following document. Output ONLY the formatted text, no explanations:`;
+IMPORTANT: Your response must start with "1." — do not include ANY text before the first numbered item.
+
+Now convert this document:`;
 
 export function getManualPrompt(): string {
-  return SYSTEM_PROMPT + '\n\n[PASTE YOUR DOCUMENT TEXT HERE]';
+  return `Copy this prompt into Claude, then paste your document after the line that says "PASTE DOCUMENT BELOW":
+
+---
+${SYSTEM_PROMPT}
+
+--- PASTE DOCUMENT BELOW ---
+[Replace this line with your document text]`;
 }
 
 export async function smartParse(text: string): Promise<string> {
