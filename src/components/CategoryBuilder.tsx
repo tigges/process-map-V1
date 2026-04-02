@@ -7,6 +7,8 @@ export interface Category {
   name: string;
   description: string;
   steps: ParsedStep[];
+  kind?: 'process' | 'facts';
+  origin?: 'auto' | 'user';
 }
 
 interface CategoryBuilderProps {
@@ -84,6 +86,7 @@ export default function CategoryBuilder({ suggestedCategories, onConfirm, onBack
             ) : (
               <span className="cat-builder__name" onClick={() => handleStartEdit(cat)}>
                 {cat.name}
+                {cat.origin === 'auto' && cat.kind === 'facts' ? ' • Auto' : ''}
               </span>
             )}
             <div className="cat-builder__actions">

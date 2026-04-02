@@ -13,6 +13,7 @@ interface StepAllocatorProps {
 
 export default function StepAllocator({ categories: initialCats, steps, onConfirm, onBack }: StepAllocatorProps) {
   const [cats, setCats] = useState<Category[]>(initialCats);
+  const factsCategoryId = initialCats.find((c) => c.kind === 'facts')?.id ?? null;
   const [unallocated, setUnallocated] = useState<ParsedStep[]>(() => {
     const allocatedIds = new Set(initialCats.flatMap((c) => c.steps.map((s) => s.id)));
     return steps.filter((s) => !allocatedIds.has(s.id));
@@ -88,6 +89,9 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
   }, [cats, unallocated]);
 
   const totalAllocated = cats.reduce((sum, c) => sum + c.steps.length, 0);
+  const factAllocated = factsCategoryId
+    ? (cats.find((c) => c.id === factsCategoryId)?.steps.length ?? 0)
+    : 0;
 
   return (
     <div className="allocator">
@@ -97,6 +101,7 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
       <div className="allocator__stats">
         <span className="tree-review__stat">{unallocated.length} unallocated</span>
         <span className="tree-review__stat">{totalAllocated} allocated</span>
+        <span className="tree-review__stat">{factAllocated} facts allocated</span>
         <span className="tree-review__stat">{graveyard.length} discarded</span>
         {hasApiKey() && (
           <button className="btn btn--secondary btn--sm" onClick={handleAutoAllocate} disabled={aiLoading || unallocated.length === 0}>
@@ -120,6 +125,10 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
                 onDragStart={() => handleDragStart(step)}
               >
                 <span className="allocator__step-label">{step.label}</span>
+                {step.semanticKind === 'fact' && <span className="allocator__fact-badge">Fact candidate</span>}
+                {step.semanticKind !== 'fact' && (step.semanticScore ?? 0) >= 0.45 && (
+                  <span className="allocator__fact-badge allocator__fact-badge--soft">Maybe fact</span>
+                )}
                 <span className="allocator__step-type">{step.nodeType}</span>
               </div>
             ))}
@@ -155,6 +164,7 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
               <div className="allocator__cat-header">
                 <span className="allocator__cat-num">{ci + 1}</span>
                 <span className="allocator__cat-name">{cat.name}</span>
+                {cat.kind === 'facts' && <span className="allocator__fact-category">Facts</span>}
                 <span className="allocator__cat-count">{cat.steps.length}</span>
               </div>
               <div className="allocator__cat-steps">
@@ -164,7 +174,11 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
                     <span className="allocator__step-label">{step.label}</span>
                   </div>
                 ))}
-                {cat.steps.length === 0 && <p className="allocator__drop-hint">Drop steps here</p>}
+                {cat.steps.length === 0 && (
+                  <p className="allocator__drop-hint">
+                    {cat.kind === 'facts' ? 'Drop statements, definitions, and context items here' : 'Drop steps here'}
+                  </p>
+                )}
               </div>
             </div>
           ))}

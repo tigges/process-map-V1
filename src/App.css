@@ -1833,6 +1833,20 @@ body,
   flex-shrink: 0;
 }
 
+.allocator__step-type--fact {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.cat-builder__chip {
+  font-size: 10px;
+  color: #334155;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
 .allocator__step-num {
   font-size: 10px;
   font-weight: 700;

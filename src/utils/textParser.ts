@@ -10,6 +10,9 @@ export interface ParsedStep {
   nodeType: JourneyNodeType;
   children: ParsedStep[];
   indent: number;
+  semanticKind?: 'process' | 'fact';
+  semanticScore?: number;
+  semanticSignals?: string[];
 }
 
 const NODE_COLORS: Record<JourneyNodeType, string> = {
@@ -22,6 +25,8 @@ const CATEGORY_COLORS = [
   '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4',
   '#84cc16', '#e11d48', '#7c3aed', '#059669',
 ];
+export const FACTS_CATEGORY_NAME = 'Facts & Context';
+export const FACTS_CATEGORY_DESCRIPTION = 'Definitions, assumptions, constraints, and baseline statements';
 
 // ───── TEXT CLEANUP PIPELINE (shared by all import methods) ─────
 
@@ -159,6 +164,135 @@ function extractTypePrefix(line: string): { type: JourneyNodeType | null; cleane
 const DECISION_STARTERS = /^(if |when |does |should |will |can |is |are |has |have |check |verify |confirm |validate |ensure )/i;
 const ACTION_VERBS = /^(send |create |update |delete |add |remove |set |get |open |close |log |save |submit |upload |download |assign |escalate |notify |inform |redirect |advise |guide |process |handle |review |approve |reject |cancel |complete |reset |change |modify |request |contact |transfer |forward |post |click |select |enter |fill |search |navigate |enable |disable )/i;
 const FLOW_ARROW = / -> /;
+const ACTION_WORD_PATTERN = /\b(send|create|update|delete|add|remove|set|get|open|close|log|save|submit|upload|download|assign|escalate|notify|inform|redirect|advise|guide|process|handle|review|approve|reject|cancel|complete|reset|change|modify|request|contact|transfer|forward|post|click|select|enter|fill|search|navigate|enable|disable)\b/i;
+const FACT_CUE_STARTERS = /^(context|background|fact|statement|definition|policy|rule|constraint|assumption|premise|current state|concept)\b/i;
+const FACT_DEFINITION_PATTERN = /\b(is|are|means|defined as|refers to|consists of)\b/i;
+const FACT_MEASURE_PATTERN = /(%|\bas of\b|\bcurrently\b|\bbaseline\b|\btarget\b|\bthreshold\b|\bsla\b|\bkpi\b|\b\d+\s*(days?|hours?|minutes?)\b)/i;
+
+function normalizeDedupKey(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3);
+}
+
+function jaccardSimilarity(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  const aSet = new Set(a);
+  const bSet = new Set(b);
+  let intersection = 0;
+  for (const token of aSet) {
+    if (bSet.has(token)) intersection++;
+  }
+  const union = new Set([...aSet, ...bSet]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function textSimilarity(a: string, b: string): number {
+  const aNorm = normalizeDedupKey(a);
+  const bNorm = normalizeDedupKey(b);
+  if (!aNorm || !bNorm) return 0;
+  if (aNorm === bNorm) return 1;
+  return jaccardSimilarity(tokenize(a), tokenize(b));
+}
+
+function scoreFactStatement(step: ParsedStep): { score: number; signals: string[] } {
+  const label = step.label.trim();
+  const descRaw = step.description.replace(/^\[[^\]]+\]\s*/, '').trim();
+  const combined = `${label} ${descRaw}`.trim();
+  const lower = combined.toLowerCase();
+  let score = 0;
+  const signals: string[] = [];
+
+  if (FACT_CUE_STARTERS.test(label.toLowerCase())) {
+    score += 0.45;
+    signals.push('fact-cue-starter');
+  }
+  if (FACT_DEFINITION_PATTERN.test(lower)) {
+    score += 0.2;
+    signals.push('definition-pattern');
+  }
+  if (FACT_MEASURE_PATTERN.test(lower)) {
+    score += 0.15;
+    signals.push('metric-or-baseline');
+  }
+
+  const hasQuestion = lower.includes('?') || DECISION_STARTERS.test(label.toLowerCase());
+  const actionLike = ACTION_VERBS.test(label.toLowerCase()) || ACTION_VERBS.test(descRaw.toLowerCase());
+  if (!hasQuestion && !actionLike) {
+    score += 0.1;
+    signals.push('non-procedural-tone');
+  }
+
+  if (step.nodeType === 'decision' || hasQuestion) {
+    score -= 0.45;
+    signals.push('decision-like');
+  }
+  if (actionLike) {
+    score -= 0.3;
+    signals.push('action-like');
+  }
+  if (/\b(player|customer|user|agent|support|system|sm)\b/i.test(lower) && ACTION_WORD_PATTERN.test(lower)) {
+    score -= 0.2;
+    signals.push('actor-action');
+  }
+
+  const clamped = Math.max(0, Math.min(1, score));
+  return { score: clamped, signals };
+}
+
+function annotateSemanticStep(step: ParsedStep): ParsedStep {
+  const { score, signals } = scoreFactStatement(step);
+  const isFact = score >= 0.6;
+  return {
+    ...step,
+    semanticKind: isFact ? 'fact' : 'process',
+    semanticScore: score,
+    semanticSignals: signals,
+    children: step.children.map(annotateSemanticStep),
+  };
+}
+
+function annotateSemanticSteps(steps: ParsedStep[]): ParsedStep[] {
+  return steps.map(annotateSemanticStep);
+}
+
+export function ensureFactsCategory(names: string[]): string[] {
+  const hasFacts = names.some((n) => normalizeDedupKey(n) === normalizeDedupKey(FACTS_CATEGORY_NAME));
+  if (hasFacts) return names;
+  return [...names, FACTS_CATEGORY_NAME];
+}
+
+function countFactsInStep(step: ParsedStep): number {
+  const self = step.semanticKind === 'fact' ? 1 : 0;
+  return self + step.children.reduce((sum, child) => sum + countFactsInStep(child), 0);
+}
+
+export function countFactCandidates(steps: ParsedStep[]): number {
+  return steps.reduce((sum, step) => sum + countFactsInStep(step), 0);
+}
+
+function shouldMergeDuplicate(existing: ParsedStep, candidate: ParsedStep): boolean {
+  if (existing.nodeType !== candidate.nodeType) return false;
+  const existingChildren = existing.children.map((c) => normalizeDedupKey(c.label)).filter(Boolean);
+  const candidateChildren = candidate.children.map((c) => normalizeDedupKey(c.label)).filter(Boolean);
+
+  if (existingChildren.length > 0 || candidateChildren.length > 0) {
+    if (existingChildren.length === 0 || candidateChildren.length === 0) return false;
+    const childSimilarity = jaccardSimilarity(existingChildren, candidateChildren);
+    const descSimilarity = textSimilarity(existing.description, candidate.description);
+    return childSimilarity >= 0.65 || (childSimilarity >= 0.4 && descSimilarity >= 0.7);
+  }
+
+  if (!existing.description && !candidate.description) return true;
+  if (!existing.description || !candidate.description) return false;
+  return textSimilarity(existing.description, candidate.description) >= 0.8;
+}
 
 function classifyByContent(text: string): JourneyNodeType {
   const lower = text.toLowerCase();
@@ -276,7 +410,7 @@ export function parseTextToSteps(text: string): ParsedStep[] {
     }
   }
 
-  return steps;
+  return annotateSemanticSteps(steps);
 }
 
 // ───── NORMALIZATION (shared post-parse layer) ─────
@@ -285,17 +419,32 @@ function normalizeSteps(steps: ParsedStep[]): ParsedStep[] {
   let result = steps.filter((s) => s.label.trim().length > 0);
 
   const merged: ParsedStep[] = [];
-  const seen = new Map<string, number>();
+  const seen = new Map<string, number[]>();
 
   for (const step of result) {
-    const key = step.label.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (seen.has(key)) {
-      const existing = merged[seen.get(key)!];
+    const key = normalizeDedupKey(step.label);
+    const candidateIndexes = seen.get(key) ?? [];
+    let mergedInto = -1;
+    for (const idx of candidateIndexes) {
+      if (shouldMergeDuplicate(merged[idx], step)) {
+        mergedInto = idx;
+        break;
+      }
+    }
+
+    if (mergedInto >= 0) {
+      const existing = merged[mergedInto];
       existing.children.push(...step.children);
       if (!existing.description && step.description) existing.description = step.description;
+      if ((step.semanticScore ?? 0) > (existing.semanticScore ?? 0)) {
+        existing.semanticScore = step.semanticScore;
+        existing.semanticKind = step.semanticKind;
+        existing.semanticSignals = step.semanticSignals;
+      }
     } else {
-      seen.set(key, merged.length);
+      const newIndex = merged.length;
       merged.push({ ...step, children: [...step.children] });
+      seen.set(key, [...candidateIndexes, newIndex]);
     }
   }
 
@@ -572,6 +721,7 @@ export function parseTextToProject(text: string, projectName: string): ProcessMa
 
 export interface AllocatedCategory {
   name: string;
+  kind?: 'process' | 'facts';
   steps: ParsedStep[];
 }
 
@@ -591,12 +741,36 @@ export function allocatedToProject(
     if (cat.steps.length === 0) continue;
     const nodeId = nanoid();
     const subMapId = nanoid();
-    const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+    const isFactsCategory = cat.kind === 'facts';
+    const categoryColor = isFactsCategory ? '#94a3b8' : CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
     colorIdx++;
 
-    const { nodes: subNodes, edges: subEdges } = buildFlowMap(cat.steps);
+    let subNodes: Node<JourneyNodeData>[];
+    let subEdges: Edge[];
+    if (isFactsCategory) {
+      const columns = Math.min(Math.ceil(Math.sqrt(cat.steps.length || 1)), 4);
+      subNodes = cat.steps.map((step, i) => ({
+        id: nanoid(),
+        type: 'journeyNode',
+        position: { x: (i % columns) * 220, y: Math.floor(i / columns) * 120 },
+        data: {
+          label: step.label,
+          description: step.description,
+          nodeType: 'action',
+          color: '#94a3b8',
+        },
+      }));
+      subEdges = [];
+    } else {
+      const built = buildFlowMap(cat.steps);
+      subNodes = built.nodes;
+      subEdges = built.edges;
+    }
+
     maps[subMapId] = {
-      id: subMapId, name: cat.name, description: `${cat.steps.length} steps`,
+      id: subMapId,
+      name: cat.name,
+      description: isFactsCategory ? `${cat.steps.length} statements` : `${cat.steps.length} steps`,
       parentMapId: rootMapId, parentNodeId: nodeId,
       nodes: subNodes, edges: subEdges,
     };
@@ -605,7 +779,7 @@ export function allocatedToProject(
       id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
       data: {
         label: cat.name,
-        description: `${cat.steps.length} steps`,
+        description: isFactsCategory ? `${cat.steps.length} statements` : `${cat.steps.length} steps`,
         nodeType: 'subprocess', color: categoryColor, subMapId,
       },
     });

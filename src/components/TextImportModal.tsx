@@ -1,6 +1,15 @@
 import { useState, useCallback, useMemo, useRef, type ChangeEvent } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { parseTextToSteps, stepsToProject, allocatedToProject, type ParsedStep } from '../utils/textParser';
+import {
+  parseTextToSteps,
+  stepsToProject,
+  allocatedToProject,
+  FACTS_CATEGORY_NAME,
+  FACTS_CATEGORY_DESCRIPTION,
+  ensureFactsCategory,
+  countFactCandidates,
+  type ParsedStep,
+} from '../utils/textParser';
 import { hasApiKey, smartParse, estimateCost, getManualPrompt } from '../utils/claudeApi';
 import ParsedTreeReview from './ParsedTreeReview';
 import CategoryBuilder, { type Category } from './CategoryBuilder';
@@ -40,12 +49,14 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
 
   const aiAvailable = hasApiKey();
   const costEstimate = text ? estimateCost(text) : null;
+  const factCount = useMemo(() => countFactCandidates(parsedSteps), [parsedSteps]);
 
   const suggestedCategories = useMemo(() => {
-    return parsedSteps
+    const base = parsedSteps
       .filter((s) => s.nodeType === 'subprocess' || s.children.length > 0)
       .map((s) => s.label);
-  }, [parsedSteps]);
+    return factCount > 0 ? ensureFactsCategory(base) : base;
+  }, [parsedSteps, factCount]);
 
   const flatSteps = useMemo(() => {
     const flat: ParsedStep[] = [];
@@ -116,9 +127,20 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   }, []);
 
   const handleCategoriesConfirm = useCallback((cats: Category[]) => {
-    setCategories(cats);
+    const names = cats.map((c) => c.name);
+    const withFacts = factCount > 0 && !names.includes(FACTS_CATEGORY_NAME)
+      ? [...cats, {
+          id: crypto.randomUUID(),
+          name: FACTS_CATEGORY_NAME,
+          description: FACTS_CATEGORY_DESCRIPTION,
+          steps: [],
+          kind: 'facts' as const,
+          origin: 'auto' as const,
+        }]
+      : cats;
+    setCategories(withFacts);
     setWizardStep('allocate');
-  }, []);
+  }, [factCount]);
 
   const handleAllocateConfirm = useCallback(
     (cats: Category[], graveyard: ParsedStep[]) => {
@@ -317,6 +339,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
               <p className="modal__hint">
                 Review the detected structure. Rename items, change types, or remove entries.
                 Recommended: continue to customize categories and allocate steps before importing.
+                {factCount > 0 ? ` Detected ${factCount} fact/context statements. They will be pre-allocated to '${FACTS_CATEGORY_NAME}' in Step 4.` : ''}
               </p>
               <ParsedTreeReview steps={parsedSteps} onUpdate={setParsedSteps} />
             </>
