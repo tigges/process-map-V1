@@ -13,6 +13,8 @@ export interface ParsedStep {
   semanticKind?: 'process' | 'fact';
   semanticScore?: number;
   semanticSignals?: string[];
+  sourceId?: string;
+  sourceName?: string;
 }
 
 const NODE_COLORS: Record<JourneyNodeType, string> = {
@@ -722,7 +724,14 @@ export function parseTextToProject(text: string, projectName: string): ProcessMa
 export interface AllocatedCategory {
   name: string;
   kind?: 'process' | 'facts';
+  sourceId?: string;
+  sourceName?: string;
   steps: ParsedStep[];
+}
+
+export interface AllocatedToProjectOptions {
+  groupBySource?: boolean;
+  dedupePolicy?: 'within_file' | 'cross_file_safe';
 }
 
 export function allocatedToProject(
@@ -730,6 +739,7 @@ export function allocatedToProject(
   graveyardSteps: ParsedStep[],
   projectName: string,
   isDraft: boolean,
+  options?: AllocatedToProjectOptions,
 ): ProcessMapProject {
   const projectId = nanoid();
   const rootMapId = nanoid();
@@ -737,12 +747,14 @@ export function allocatedToProject(
   const rawOverviewNodes: Node<JourneyNodeData>[] = [];
   let colorIdx = 0;
 
-  for (const cat of categories) {
-    if (cat.steps.length === 0) continue;
-    const nodeId = nanoid();
+  const createCategorySubMap = (
+    cat: AllocatedCategory,
+    parentMapId: string,
+    parentNodeId: string,
+  ): { subMapId: string; description: string; color: string } => {
     const subMapId = nanoid();
     const isFactsCategory = cat.kind === 'facts';
-    const categoryColor = isFactsCategory ? '#94a3b8' : CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+    const color = isFactsCategory ? '#94a3b8' : CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
     colorIdx++;
 
     let subNodes: Node<JourneyNodeData>[];
@@ -767,37 +779,149 @@ export function allocatedToProject(
       subEdges = built.edges;
     }
 
+    const description = isFactsCategory ? `${cat.steps.length} statements` : `${cat.steps.length} steps`;
     maps[subMapId] = {
       id: subMapId,
       name: cat.name,
-      description: isFactsCategory ? `${cat.steps.length} statements` : `${cat.steps.length} steps`,
-      parentMapId: rootMapId, parentNodeId: nodeId,
-      nodes: subNodes, edges: subEdges,
+      description,
+      parentMapId,
+      parentNodeId,
+      nodes: subNodes,
+      edges: subEdges,
     };
 
-    rawOverviewNodes.push({
-      id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
-      data: {
-        label: cat.name,
-        description: isFactsCategory ? `${cat.steps.length} statements` : `${cat.steps.length} steps`,
-        nodeType: 'subprocess', color: categoryColor, subMapId,
-      },
-    });
-  }
+    return { subMapId, description, color };
+  };
 
-  if (graveyardSteps.length > 0) {
-    const gId = nanoid();
-    const gMapId = nanoid();
-    const gNodes: Node<JourneyNodeData>[] = graveyardSteps.map((s, i) => ({
-      id: nanoid(), type: 'journeyNode' as const,
-      position: { x: (i % 4) * 200, y: Math.floor(i / 4) * 100 },
-      data: { label: s.label, description: s.description, nodeType: 'action' as const, color: '#94a3b8' },
-    }));
-    maps[gMapId] = { id: gMapId, name: 'Unclassified', description: `${graveyardSteps.length} items`, parentMapId: rootMapId, parentNodeId: gId, nodes: gNodes, edges: [] };
-    rawOverviewNodes.push({
-      id: gId, type: 'journeyNode', position: { x: 0, y: 0 },
-      data: { label: 'Unclassified', description: `${graveyardSteps.length} items`, nodeType: 'subprocess', color: '#94a3b8', subMapId: gMapId },
-    });
+  if (options?.groupBySource) {
+    type SourceGroup = {
+      sourceId: string;
+      sourceName: string;
+      categories: AllocatedCategory[];
+      graveyard: ParsedStep[];
+    };
+    const sourceGroups = new Map<string, SourceGroup>();
+
+    const ensureGroup = (sourceId: string, sourceName: string): SourceGroup => {
+      const existing = sourceGroups.get(sourceId);
+      if (existing) return existing;
+      const created: SourceGroup = { sourceId, sourceName, categories: [], graveyard: [] };
+      sourceGroups.set(sourceId, created);
+      return created;
+    };
+
+    for (const cat of categories) {
+      if (cat.steps.length === 0) continue;
+      const sourceId = cat.sourceId ?? '__unsourced';
+      const sourceName = cat.sourceName?.trim() || 'Imported Source';
+      ensureGroup(sourceId, sourceName).categories.push(cat);
+    }
+    for (const step of graveyardSteps) {
+      const sourceId = step.sourceId ?? '__unsourced';
+      const sourceName = step.sourceName?.trim() || 'Imported Source';
+      ensureGroup(sourceId, sourceName).graveyard.push(step);
+    }
+
+    for (const group of sourceGroups.values()) {
+      if (group.categories.length === 0 && group.graveyard.length === 0) continue;
+
+      const sourceNodeId = nanoid();
+      const sourceMapId = nanoid();
+      const sourceOverviewNodes: Node<JourneyNodeData>[] = [];
+
+      for (const cat of group.categories) {
+        const catNodeId = nanoid();
+        const built = createCategorySubMap(cat, sourceMapId, catNodeId);
+        sourceOverviewNodes.push(buildOverviewNode(
+          catNodeId,
+          cat.name,
+          built.description,
+          built.color,
+          built.subMapId,
+        ));
+      }
+
+      if (group.graveyard.length > 0) {
+        const gNodeId = nanoid();
+        const gMapId = nanoid();
+        const gNodes: Node<JourneyNodeData>[] = group.graveyard.map((s, i) => ({
+          id: nanoid(), type: 'journeyNode' as const,
+          position: { x: (i % 4) * 200, y: Math.floor(i / 4) * 100 },
+          data: { label: s.label, description: s.description, nodeType: 'action' as const, color: '#94a3b8' },
+        }));
+        maps[gMapId] = {
+          id: gMapId,
+          name: 'Unclassified',
+          description: `${group.graveyard.length} items`,
+          parentMapId: sourceMapId,
+          parentNodeId: gNodeId,
+          nodes: gNodes,
+          edges: [],
+        };
+        sourceOverviewNodes.push(buildOverviewNode(
+          gNodeId,
+          'Unclassified',
+          `${group.graveyard.length} items`,
+          '#94a3b8',
+          gMapId,
+        ));
+      }
+
+      const cols = Math.min(Math.ceil(Math.sqrt(sourceOverviewNodes.length || 1)), 4);
+      const positionedSourceNodes = sourceOverviewNodes.map((node, i) => ({
+        ...node,
+        position: { x: (i % cols) * 280, y: Math.floor(i / cols) * 160 },
+      }));
+
+      maps[sourceMapId] = {
+        id: sourceMapId,
+        name: group.sourceName,
+        description: `${group.categories.length} categories`,
+        parentMapId: rootMapId,
+        parentNodeId: sourceNodeId,
+        nodes: positionedSourceNodes,
+        edges: [],
+      };
+
+      rawOverviewNodes.push(buildOverviewNode(
+        sourceNodeId,
+        group.sourceName,
+        `${group.categories.length} categories`,
+        '#334155',
+        sourceMapId,
+      ));
+    }
+  } else {
+    for (const cat of categories) {
+      if (cat.steps.length === 0) continue;
+      const nodeId = nanoid();
+      const built = createCategorySubMap(cat, rootMapId, nodeId);
+      rawOverviewNodes.push({
+        id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
+        data: {
+          label: cat.name,
+          description: built.description,
+          nodeType: 'subprocess',
+          color: built.color,
+          subMapId: built.subMapId,
+        },
+      });
+    }
+
+    if (graveyardSteps.length > 0) {
+      const gId = nanoid();
+      const gMapId = nanoid();
+      const gNodes: Node<JourneyNodeData>[] = graveyardSteps.map((s, i) => ({
+        id: nanoid(), type: 'journeyNode' as const,
+        position: { x: (i % 4) * 200, y: Math.floor(i / 4) * 100 },
+        data: { label: s.label, description: s.description, nodeType: 'action' as const, color: '#94a3b8' },
+      }));
+      maps[gMapId] = { id: gMapId, name: 'Unclassified', description: `${graveyardSteps.length} items`, parentMapId: rootMapId, parentNodeId: gId, nodes: gNodes, edges: [] };
+      rawOverviewNodes.push({
+        id: gId, type: 'journeyNode', position: { x: 0, y: 0 },
+        data: { label: 'Unclassified', description: `${graveyardSteps.length} items`, nodeType: 'subprocess', color: '#94a3b8', subMapId: gMapId },
+      });
+    }
   }
 
   const columns = Math.min(Math.ceil(Math.sqrt(rawOverviewNodes.length)), 4);

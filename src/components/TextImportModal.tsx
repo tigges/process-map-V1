@@ -31,6 +31,14 @@ For best results with complex documents, enable "Smart Parse (AI)"
 which uses Claude to intelligently structure your content.`;
 
 type WizardStep = 'paste' | 'confirm-ai' | 'review' | 'categories' | 'allocate';
+type GroupingMode = 'per_file' | 'shared_categories';
+type DedupePolicy = 'within_file' | 'cross_file_safe';
+
+interface ParsedSourceFile {
+  id: string;
+  name: string;
+  steps: ParsedStep[];
+}
 
 export default function TextImportModal({ onClose }: TextImportModalProps) {
   const importProject = useAppStore((s) => s.importProject);
@@ -47,23 +55,33 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [allowAiCategoryExpansion, setAllowAiCategoryExpansion] = useState(false);
   const [alwaysIncludeFacts, setAlwaysIncludeFacts] = useState(true);
+  const [groupingMode, setGroupingMode] = useState<GroupingMode>('per_file');
+  const [dedupePolicy, setDedupePolicy] = useState<DedupePolicy>('within_file');
+  const [parsedFiles, setParsedFiles] = useState<ParsedSourceFile[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const aiAvailable = hasApiKey();
   const costEstimate = text ? estimateCost(text) : null;
-  const factCount = useMemo(() => countFactCandidates(parsedSteps), [parsedSteps]);
+  const displayedSteps = useMemo(() => {
+    if (!activeFileId) return parsedSteps;
+    const selected = parsedFiles.find((f) => f.id === activeFileId);
+    return selected ? selected.steps : parsedSteps;
+  }, [activeFileId, parsedFiles, parsedSteps]);
+
+  const factCount = useMemo(() => countFactCandidates(displayedSteps), [displayedSteps]);
 
   const suggestedCategories = useMemo(() => {
-    const base = parsedSteps
+    const base = displayedSteps
       .filter((s) => s.nodeType === 'subprocess' || s.children.length > 0)
       .map((s) => s.label);
     if (alwaysIncludeFacts || factCount > 0) return ensureFactsCategory(base);
     return base;
-  }, [parsedSteps, factCount, alwaysIncludeFacts]);
+  }, [displayedSteps, factCount, alwaysIncludeFacts]);
 
   const flatSteps = useMemo(() => {
     const flat: ParsedStep[] = [];
-    for (const step of parsedSteps) {
+    for (const step of displayedSteps) {
       if (step.children.length > 0) {
         flat.push(...step.children);
       } else {
@@ -71,7 +89,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       }
     }
     return flat;
-  }, [parsedSteps]);
+  }, [displayedSteps]);
 
   const handleBasicParse = useCallback(() => {
     if (!text.trim()) return;
@@ -93,6 +111,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       setText(structured);
       const steps = parseTextToSteps(structured);
       setParsedSteps(steps);
+      setParsedFiles([]);
+      setActiveFileId(null);
       setWasAiParsed(true);
       setWizardStep('review');
     } catch (err) {
@@ -150,67 +170,110 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     (cats: Category[], graveyard: ParsedStep[], unallocated: ParsedStep[]) => {
       // Safety-first: unresolved items are never silently dropped.
       const allGraveyard = [...graveyard, ...unallocated];
-      const allocatedCats = cats.map((c) => ({ name: c.name, kind: c.kind, steps: c.steps }));
-      const project = allocatedToProject(allocatedCats, allGraveyard, projectName || 'Imported Journey', false);
+      const allocatedCats = cats.map((c) => ({
+        name: c.name,
+        kind: c.kind,
+        steps: c.steps,
+        sourceId: activeFileId ?? undefined,
+        sourceName: activeFileId ? (parsedFiles.find((f) => f.id === activeFileId)?.name ?? 'Imported Source') : undefined,
+      }));
+      const project = allocatedToProject(
+        allocatedCats,
+        allGraveyard,
+        projectName || 'Imported Journey',
+        false,
+        {
+          groupBySource: groupingMode === 'per_file',
+          dedupePolicy,
+        },
+      );
       importProject(JSON.stringify(project));
       if (unallocated.length > 0) {
         console.info(`Moved ${unallocated.length} unallocated steps to Unclassified during import.`);
       }
       onClose();
     },
-    [projectName, importProject, onClose],
+    [projectName, importProject, onClose, groupingMode, dedupePolicy, activeFileId, parsedFiles],
   );
 
   const handleFileUpload = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
+  const parseSingleFile = useCallback(async (file: File): Promise<{ name: string; text: string }> => {
     const name = file.name.toLowerCase();
+    let fileText = '';
+    if (name.endsWith('.pdf')) {
+      const pdfjsLib = await import('pdfjs-dist');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString();
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pages: string[] = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const lines: string[] = [];
+        let lastY: number | null = null;
+        for (const item of content.items) {
+          if (!('str' in item)) continue;
+          const textItem = item as { str: string; transform: number[] };
+          const y = Math.round(textItem.transform[5]);
+          if (lastY !== null && Math.abs(y - lastY) > 5) lines.push('\n');
+          lines.push(textItem.str);
+          lastY = y;
+        }
+        pages.push(lines.join(''));
+      }
+      fileText = pages.join('\n\n');
+    } else if (name.endsWith('.docx')) {
+      const { extractDocxText } = await import('../utils/exportImport');
+      fileText = await extractDocxText(file);
+    } else {
+      fileText = await file.text();
+    }
+    return { name: file.name, text: fileText };
+  }, []);
+
+  const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    e.target.value = '';
 
     setLoading(true);
     try {
-      let fileText = '';
-      if (name.endsWith('.pdf')) {
-        const pdfjsLib = await import('pdfjs-dist');
-        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString();
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        const pages: string[] = [];
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          const lines: string[] = [];
-          let lastY: number | null = null;
-          for (const item of content.items) {
-            if (!('str' in item)) continue;
-            const textItem = item as { str: string; transform: number[] };
-            const y = Math.round(textItem.transform[5]);
-            if (lastY !== null && Math.abs(y - lastY) > 5) lines.push('\n');
-            lines.push(textItem.str);
-            lastY = y;
-          }
-          pages.push(lines.join(''));
-        }
-        fileText = pages.join('\n\n');
-      } else if (name.endsWith('.docx')) {
-        const { extractDocxText } = await import('../utils/exportImport');
-        fileText = await extractDocxText(file);
+      if (files.length === 1) {
+        const parsed = await parseSingleFile(files[0]);
+        setText(parsed.text);
+        setParsedFiles([]);
+        setActiveFileId(null);
+        if (!projectName) setProjectName(parsed.name.replace(/\.\w+$/, ''));
       } else {
-        fileText = await file.text();
+        const results: ParsedSourceFile[] = [];
+        const mergedTextParts: string[] = [];
+        for (const file of files) {
+          const parsed = await parseSingleFile(file);
+          const steps = parseTextToSteps(parsed.text).map((s) => ({
+            ...s,
+            sourceId: file.name,
+            sourceName: file.name,
+            children: s.children.map((c) => ({ ...c, sourceId: file.name, sourceName: file.name })),
+          }));
+          results.push({ id: file.name, name: file.name, steps });
+          mergedTextParts.push(`## ${file.name}\n${parsed.text}`);
+        }
+        setParsedFiles(results);
+        setActiveFileId(results[0]?.id ?? null);
+        setParsedSteps(results.flatMap((r) => r.steps));
+        setText(mergedTextParts.join('\n\n'));
+        if (!projectName) setProjectName('Multi-file import');
       }
-      setText(fileText);
-      if (!projectName) setProjectName(file.name.replace(/\.\w+$/, ''));
     } catch (err) {
       console.error('File import failed:', err);
       setText('Error: Could not extract text from file.');
     } finally {
       setLoading(false);
     }
-  }, [projectName]);
+  }, [parseSingleFile, projectName]);
 
   const handleCopyPrompt = useCallback(() => {
     navigator.clipboard.writeText(getManualPrompt()).then(() => {
@@ -282,7 +345,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                 <label className="modal__label">
                   Source
                   <button className="btn btn--ghost btn--sm" onClick={handleFileUpload} style={{ marginLeft: 8 }}>
-                    Upload file (.txt, .pdf, .docx)
+                    Upload file(s) (.txt, .pdf, .docx)
                   </button>
                   <button className="btn btn--ghost btn--sm" onClick={handleCopyPrompt} style={{ marginLeft: 4 }}>
                     {promptCopied ? 'Copied!' : 'Copy Claude Prompt'}
@@ -300,9 +363,34 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                   ref={fileInputRef}
                   type="file"
                   accept=".txt,.md,.text,.pdf,.docx"
+                  multiple
                   style={{ display: 'none' }}
                   onChange={handleFileChange}
                 />
+              </div>
+              <div className="modal__parse-mode">
+                <label className="modal__toggle-label">
+                  <span>Grouping mode:</span>
+                  <select
+                    className="allocator__review-select"
+                    value={groupingMode}
+                    onChange={(e) => setGroupingMode(e.target.value as GroupingMode)}
+                  >
+                    <option value="per_file">Per-file categories (recommended)</option>
+                    <option value="shared_categories">Shared categories across files</option>
+                  </select>
+                </label>
+                <label className="modal__toggle-label">
+                  <span>Dedupe policy:</span>
+                  <select
+                    className="allocator__review-select"
+                    value={dedupePolicy}
+                    onChange={(e) => setDedupePolicy(e.target.value as DedupePolicy)}
+                  >
+                    <option value="within_file">Within file only</option>
+                    <option value="cross_file_safe">Cross-file safe</option>
+                  </select>
+                </label>
               </div>
               <div className="modal__parse-mode">
                 <label className="modal__toggle-label">
@@ -350,7 +438,35 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                 Recommended: continue to customize categories and allocate steps before importing.
                 {factCount > 0 ? ` Detected ${factCount} fact/context statements. They will be pre-allocated to '${FACTS_CATEGORY_NAME}' in Step 4.` : ''}
               </p>
-              <ParsedTreeReview steps={parsedSteps} onUpdate={setParsedSteps} />
+              {parsedFiles.length > 0 && (
+                <div className="allocator__stats" style={{ marginBottom: 8 }}>
+                  {parsedFiles.map((f) => (
+                    <button
+                      key={f.id}
+                      className={`toolbar__toggle ${activeFileId === f.id ? 'toolbar__toggle--active' : ''}`}
+                      onClick={() => setActiveFileId(f.id)}
+                    >
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <ParsedTreeReview
+                steps={displayedSteps}
+                onUpdate={(updated) => {
+                  if (!activeFileId) {
+                    setParsedSteps(updated);
+                    return;
+                  }
+                  setParsedFiles((prev) => prev.map((f) => f.id === activeFileId ? { ...f, steps: updated } : f));
+                  setParsedSteps(() => {
+                    const others = parsedFiles
+                      .filter((f) => f.id !== activeFileId)
+                      .flatMap((f) => f.steps);
+                    return [...others, ...updated];
+                  });
+                }}
+              />
             </>
           )}
 
