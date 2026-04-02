@@ -316,7 +316,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
             <>
               <p className="modal__hint">
                 Review the detected structure. Rename items, change types, or remove entries.
-                You can import directly, or continue to manually define categories and allocate steps.
+                Recommended: continue to customize categories and allocate steps before importing.
               </p>
               <ParsedTreeReview steps={parsedSteps} onUpdate={setParsedSteps} />
             </>
@@ -363,14 +363,14 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
           {wizardStep === 'review' && (
             <>
               <button className="btn btn--ghost" onClick={() => setWizardStep('paste')}>← Back</button>
+              <button className="btn btn--primary" onClick={handleCustomImport} disabled={parsedSteps.length === 0}>
+                Continue to Customize Categories →
+              </button>
               <button className="btn btn--secondary" onClick={handleImportAsDraft} disabled={parsedSteps.length === 0}>
-                Import as Draft
+                Quick Import as Draft
               </button>
-              <button className="btn btn--secondary" onClick={handleCustomImport} disabled={parsedSteps.length === 0}>
-                Customize Categories →
-              </button>
-              <button className="btn btn--primary" onClick={handleImportFinal} disabled={parsedSteps.length === 0}>
-                Import & Finalize
+              <button className="btn btn--secondary" onClick={handleImportFinal} disabled={parsedSteps.length === 0}>
+                Quick Import & Finalize
               </button>
             </>
           )}
