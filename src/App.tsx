@@ -75,6 +75,7 @@ export default function App() {
                     {showInspector && <NodeInspector />}
                   </div>
                 </div>
+              </div>
               </ReactFlowProvider>
             </SearchTermContext.Provider>
           </ShowNumbersContext.Provider>
