@@ -1,8 +1,10 @@
-import { useState, useCallback, useRef, type ChangeEvent } from 'react';
+import { useState, useCallback, useMemo, useRef, type ChangeEvent } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { parseTextToSteps, stepsToProject, type ParsedStep } from '../utils/textParser';
+import { parseTextToSteps, stepsToProject, allocatedToProject, type ParsedStep } from '../utils/textParser';
 import { hasApiKey, smartParse, estimateCost, getManualPrompt } from '../utils/claudeApi';
 import ParsedTreeReview from './ParsedTreeReview';
+import CategoryBuilder, { type Category } from './CategoryBuilder';
+import StepAllocator from './StepAllocator';
 
 interface TextImportModalProps {
   onClose: () => void;
@@ -19,7 +21,7 @@ The parser detects:
 For best results with complex documents, enable "Smart Parse (AI)"
 which uses Claude to intelligently structure your content.`;
 
-type WizardStep = 'paste' | 'confirm-ai' | 'review';
+type WizardStep = 'paste' | 'confirm-ai' | 'review' | 'categories' | 'allocate';
 
 export default function TextImportModal({ onClose }: TextImportModalProps) {
   const importProject = useAppStore((s) => s.importProject);
@@ -33,10 +35,29 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [useAi, setUseAi] = useState(false);
   const [wasAiParsed, setWasAiParsed] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const aiAvailable = hasApiKey();
   const costEstimate = text ? estimateCost(text) : null;
+
+  const suggestedCategories = useMemo(() => {
+    return parsedSteps
+      .filter((s) => s.nodeType === 'subprocess' || s.children.length > 0)
+      .map((s) => s.label);
+  }, [parsedSteps]);
+
+  const flatSteps = useMemo(() => {
+    const flat: ParsedStep[] = [];
+    for (const step of parsedSteps) {
+      if (step.children.length > 0) {
+        flat.push(...step.children);
+      } else {
+        flat.push(step);
+      }
+    }
+    return flat;
+  }, [parsedSteps]);
 
   const handleBasicParse = useCallback(() => {
     if (!text.trim()) return;
@@ -89,6 +110,25 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     importProject(JSON.stringify(project));
     onClose();
   }, [parsedSteps, projectName, importProject, onClose, wasAiParsed]);
+
+  const handleCustomImport = useCallback(() => {
+    setWizardStep('categories');
+  }, []);
+
+  const handleCategoriesConfirm = useCallback((cats: Category[]) => {
+    setCategories(cats);
+    setWizardStep('allocate');
+  }, []);
+
+  const handleAllocateConfirm = useCallback(
+    (cats: Category[], graveyard: ParsedStep[]) => {
+      const allocatedCats = cats.map((c) => ({ name: c.name, steps: c.steps }));
+      const project = allocatedToProject(allocatedCats, graveyard, projectName || 'Imported Journey', false);
+      importProject(JSON.stringify(project));
+      onClose();
+    },
+    [projectName, importProject, onClose],
+  );
 
   const handleFileUpload = useCallback(() => {
     fileInputRef.current?.click();
@@ -148,19 +188,48 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     });
   }, []);
 
+  const activeStepNum =
+    wizardStep === 'paste' || wizardStep === 'confirm-ai'
+      ? 1
+      : wizardStep === 'review'
+        ? 2
+        : wizardStep === 'categories'
+          ? 3
+          : 4;
+
+  const stepTitle =
+    wizardStep === 'paste'
+      ? 'Step 1: Paste or Upload'
+      : wizardStep === 'confirm-ai'
+        ? 'Confirm AI Processing'
+        : wizardStep === 'review'
+          ? 'Step 2: Review & Edit Structure'
+          : wizardStep === 'categories'
+            ? 'Step 3: Define Categories'
+            : 'Step 4: Allocate Steps';
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal ${wizardStep === 'allocate' ? 'modal--extra-wide' : 'modal--wide'}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">
-          <h2 className="modal__title">
-            {wizardStep === 'paste' && 'Step 1: Paste or Upload'}
-            {wizardStep === 'confirm-ai' && 'Confirm AI Processing'}
-            {wizardStep === 'review' && 'Step 2: Review & Edit Structure'}
-          </h2>
+          <h2 className="modal__title">{stepTitle}</h2>
           <div className="modal__steps">
-            <span className={`modal__step-dot ${wizardStep === 'paste' ? 'modal__step-dot--active' : 'modal__step-dot--done'}`}>1</span>
-            <span className="modal__step-line" />
-            <span className={`modal__step-dot ${wizardStep === 'review' ? 'modal__step-dot--active' : ''}`}>2</span>
+            {[1, 2, 3, 4].map((n) => (
+              <span key={n}>
+                {n > 1 && <span className="modal__step-line" />}
+                <span
+                  className={`modal__step-dot ${
+                    activeStepNum === n
+                      ? 'modal__step-dot--active'
+                      : activeStepNum > n
+                        ? 'modal__step-dot--done'
+                        : ''
+                  }`}
+                >
+                  {n}
+                </span>
+              </span>
+            ))}
           </div>
           <button className="modal__close" onClick={onClose}>✕</button>
         </div>
@@ -247,10 +316,27 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
             <>
               <p className="modal__hint">
                 Review the detected structure. Rename items, change types, or remove entries.
-                Overview shows categories — sub-steps become drill-down flow charts.
+                You can import directly, or continue to manually define categories and allocate steps.
               </p>
               <ParsedTreeReview steps={parsedSteps} onUpdate={setParsedSteps} />
             </>
+          )}
+
+          {wizardStep === 'categories' && (
+            <CategoryBuilder
+              suggestedCategories={suggestedCategories}
+              onConfirm={handleCategoriesConfirm}
+              onBack={() => setWizardStep('review')}
+            />
+          )}
+
+          {wizardStep === 'allocate' && (
+            <StepAllocator
+              categories={categories}
+              steps={flatSteps}
+              onConfirm={handleAllocateConfirm}
+              onBack={() => setWizardStep('categories')}
+            />
           )}
         </div>
 
@@ -280,11 +366,15 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
               <button className="btn btn--secondary" onClick={handleImportAsDraft} disabled={parsedSteps.length === 0}>
                 Import as Draft
               </button>
+              <button className="btn btn--secondary" onClick={handleCustomImport} disabled={parsedSteps.length === 0}>
+                Customize Categories →
+              </button>
               <button className="btn btn--primary" onClick={handleImportFinal} disabled={parsedSteps.length === 0}>
                 Import & Finalize
               </button>
             </>
           )}
+          {/* categories and allocate steps have their own footers inline */}
         </div>
       </div>
     </div>

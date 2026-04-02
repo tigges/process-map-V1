@@ -2,6 +2,7 @@ import { useState, useCallback, type ChangeEvent } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { JourneyNodeData } from '../types';
 import { NODE_TYPE_CONFIG } from '../types';
+import CrossRefText from './CrossRefText';
 
 export default function NodeInspector() {
   const selectedNodeId = useAppStore((s) => s.selectedNodeId);
@@ -78,7 +79,7 @@ export default function NodeInspector() {
         ) : (
           <>
             <h3 className="inspector__title">{nodeData.label}</h3>
-            <p className="inspector__desc">{nodeData.description || 'No description'}</p>
+            <p className="inspector__desc">{nodeData.description ? <CrossRefText text={nodeData.description} /> : 'No description'}</p>
             <div className="inspector__actions">
               <button className="btn btn--primary" onClick={startEdit}>Edit</button>
               {nodeData.nodeType === 'subprocess' && nodeData.subMapId && (

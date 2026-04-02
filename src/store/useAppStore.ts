@@ -56,6 +56,9 @@ interface AppState {
   deleteNode: (nodeId: string) => void;
   setSelectedNode: (nodeId: string | null) => void;
 
+  // Navigate to a node anywhere in the active project
+  navigateToNode: (nodeId: string) => void;
+
   // Sub-map creation
   convertToSubprocess: (nodeId: string) => void;
 
@@ -343,6 +346,29 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSelectedNode(nodeId) {
     set({ selectedNodeId: nodeId });
+  },
+
+  navigateToNode(nodeId) {
+    const project = get().getActiveProject();
+    if (!project) return;
+    for (const [mapId, map] of Object.entries(project.maps)) {
+      const found = map.nodes.find((n) => n.id === nodeId);
+      if (found) {
+        const breadcrumb: string[] = [];
+        let cur: string | null = mapId;
+        while (cur) {
+          breadcrumb.unshift(cur);
+          cur = project.maps[cur]?.parentMapId ?? null;
+        }
+        set({
+          activeMapId: mapId,
+          breadcrumb,
+          selectedNodeId: nodeId,
+          focusNodeId: nodeId,
+        });
+        return;
+      }
+    }
   },
 
   convertToSubprocess(nodeId) {

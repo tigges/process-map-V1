@@ -1583,3 +1583,338 @@ body,
 .react-flow__attribution {
   display: none !important;
 }
+
+/* ===== Modal Extra Wide Variant ===== */
+.modal--extra-wide {
+  width: 900px;
+}
+
+/* ===== Category Builder ===== */
+.cat-builder__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.cat-builder__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  min-height: 40px;
+}
+
+.cat-builder__num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.cat-builder__name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cat-builder__name:hover {
+  background: #eef2ff;
+}
+
+.cat-builder__edit {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--primary);
+  border-radius: 3px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+}
+
+.cat-builder__actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.cat-builder__btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: background 0.1s;
+}
+
+.cat-builder__btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+.cat-builder__btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.cat-builder__btn--delete:hover:not(:disabled) {
+  background: #fef2f2;
+  color: var(--danger);
+}
+
+.cat-builder__add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cat-builder__add-input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+
+.cat-builder__add-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+/* ===== Step Allocator ===== */
+.allocator__stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.allocator__columns {
+  display: flex;
+  gap: 16px;
+  min-height: 300px;
+}
+
+.allocator__left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.allocator__right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.allocator__col-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.allocator__step-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 260px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 60px;
+}
+
+.allocator__step-list--small {
+  max-height: 120px;
+}
+
+.allocator__step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.1s;
+}
+
+.allocator__step:active {
+  cursor: grabbing;
+}
+
+.allocator__step:hover {
+  box-shadow: var(--shadow);
+}
+
+.allocator__step--allocated {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.allocator__step--grey {
+  background: #f8fafc;
+  color: var(--text-muted);
+  border-color: #e2e8f0;
+}
+
+.allocator__step-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allocator__step-type {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.allocator__step-num {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.allocator__category {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.allocator__category--dragover {
+  border-color: var(--primary);
+  background: #eef2ff;
+}
+
+.allocator__cat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.allocator__cat-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.allocator__cat-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allocator__cat-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.allocator__cat-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 30px;
+}
+
+.allocator__drop-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px;
+  font-style: italic;
+}
+
+.allocator__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px;
+}
+
+.allocator__graveyard {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+/* ===== Cross-reference links ===== */
+.jnode__xref {
+  display: inline;
+  background: none;
+  border: none;
+  padding: 0 1px;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.jnode__xref:hover {
+  color: var(--primary-hover);
+  text-decoration-style: solid;
+}
+
+.inspector__desc .jnode__xref {
+  font-size: 13px;
+}

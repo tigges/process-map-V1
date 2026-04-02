@@ -4,6 +4,7 @@ import type { JourneyNodeData } from '../types';
 import { NODE_TYPE_CONFIG } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { NumbersContext, ShowNumbersContext, SearchTermContext } from '../contexts';
+import CrossRefText from './CrossRefText';
 
 function highlightText(text: string, term: string): React.ReactNode {
   if (!term || term.length < 2) return text;
@@ -108,7 +109,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
       <div className="jnode__content">
         <div className="jnode__label" style={{ color }}>{highlightText(nodeData.label, searchTerm)}</div>
         {nodeData.description && (
-          <div className="jnode__desc">{highlightText(nodeData.description, searchTerm)}</div>
+          <div className="jnode__desc"><CrossRefText text={nodeData.description} /></div>
         )}
         {isSubprocess && nodeData.subMapId && (
           <button className="jnode__open-btn" onClick={handleOpenClick} style={{ color }}>
