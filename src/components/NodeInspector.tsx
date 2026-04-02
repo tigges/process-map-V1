@@ -78,7 +78,7 @@ export default function NodeInspector() {
           </>
         ) : (
           <>
-            <h3 className="inspector__title">{nodeData.label}</h3>
+            <h3 className="inspector__title"><CrossRefText text={nodeData.label} /></h3>
             <p className="inspector__desc">{nodeData.description ? <CrossRefText text={nodeData.description} /> : 'No description'}</p>
             <div className="inspector__actions">
               <button className="btn btn--primary" onClick={startEdit}>Edit</button>

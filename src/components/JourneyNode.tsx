@@ -3,21 +3,8 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { JourneyNodeData } from '../types';
 import { NODE_TYPE_CONFIG } from '../types';
 import { useAppStore } from '../store/useAppStore';
-import { NumbersContext, ShowNumbersContext, SearchTermContext } from '../contexts';
+import { NumbersContext, ShowNumbersContext } from '../contexts';
 import CrossRefText from './CrossRefText';
-
-function highlightText(text: string, term: string): React.ReactNode {
-  if (!term || term.length < 2) return text;
-  const idx = text.toLowerCase().indexOf(term.toLowerCase());
-  if (idx === -1) return text;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="jnode__highlight">{text.slice(idx, idx + term.length)}</mark>
-      {text.slice(idx + term.length)}
-    </>
-  );
-}
 
 function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as JourneyNodeData;
@@ -27,7 +14,6 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const project = useAppStore((s) => s.getActiveProject());
   const nodeNumbers = useContext(NumbersContext);
   const showNumbers = useContext(ShowNumbersContext);
-  const searchTerm = useContext(SearchTermContext);
 
   const handleDoubleClick = useCallback(() => {
     if (nodeData.nodeType === 'subprocess' && nodeData.subMapId) {
@@ -90,7 +76,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
         <Handle type="source" position={Position.Right} id="right" className="jnode__handle" />
         <Handle type="source" position={Position.Bottom} id="bottom" className="jnode__handle" />
         <div className="jnode__content">
-          <div className="jnode__label jnode__label--dark">{highlightText(nodeData.label, searchTerm)}</div>
+          <div className="jnode__label jnode__label--dark"><CrossRefText text={nodeData.label} /></div>
         </div>
       </div>
     );
@@ -107,7 +93,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
       <Handle type="target" position={Position.Left} className="jnode__handle" />
       <Handle type="source" position={Position.Right} className="jnode__handle" />
       <div className="jnode__content">
-        <div className="jnode__label" style={{ color }}>{highlightText(nodeData.label, searchTerm)}</div>
+        <div className="jnode__label" style={{ color }}><CrossRefText text={nodeData.label} /></div>
         {nodeData.description && (
           <div className="jnode__desc"><CrossRefText text={nodeData.description} /></div>
         )}
