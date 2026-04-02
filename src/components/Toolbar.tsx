@@ -11,6 +11,8 @@ interface ToolbarProps {
   onTogglePalette: () => void;
   showInspector: boolean;
   onToggleInspector: () => void;
+  showNumbers: boolean;
+  onToggleNumbers: () => void;
 }
 
 interface SearchResult {
@@ -22,7 +24,7 @@ interface SearchResult {
   path: string;
 }
 
-export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onTogglePalette, showInspector, onToggleInspector }: ToolbarProps) {
+export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onTogglePalette, showInspector, onToggleInspector, showNumbers, onToggleNumbers }: ToolbarProps) {
   const project = useAppStore((s) => s.getActiveProject());
   const activeMap = useAppStore((s) => s.getActiveMap());
   const canvasRef = useRef<HTMLElement | null>(null);
@@ -153,6 +155,13 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
           <button className="toolbar__toggle" onClick={handleExportSvg} title="Export as SVG">SVG</button>
           <button className="toolbar__toggle" onClick={handleExportMermaid} title="Export as Mermaid">Mermaid</button>
         </div>
+        <button
+          className={`toolbar__toggle ${showNumbers ? 'toolbar__toggle--active' : ''}`}
+          onClick={onToggleNumbers}
+          title="Toggle chapter numbers"
+        >
+          #
+        </button>
         <button
           className={`toolbar__toggle ${showPalette ? 'toolbar__toggle--active' : ''}`}
           onClick={onTogglePalette}

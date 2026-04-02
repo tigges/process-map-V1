@@ -1,8 +1,9 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useContext } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { JourneyNodeData } from '../types';
 import { NODE_TYPE_CONFIG } from '../types';
 import { useAppStore } from '../store/useAppStore';
+import { NumbersContext, ShowNumbersContext } from '../contexts';
 
 function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as JourneyNodeData;
@@ -10,6 +11,8 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const setSelectedNode = useAppStore((s) => s.setSelectedNode);
   const config = NODE_TYPE_CONFIG[nodeData.nodeType];
   const project = useAppStore((s) => s.getActiveProject());
+  const nodeNumbers = useContext(NumbersContext);
+  const showNumbers = useContext(ShowNumbersContext);
 
   const handleDoubleClick = useCallback(() => {
     if (nodeData.nodeType === 'subprocess' && nodeData.subMapId) {
@@ -34,6 +37,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const isStart = nodeData.nodeType === 'start';
   const isEnd = nodeData.nodeType === 'end';
   const isTerminal = isStart || isEnd;
+  const chapterNum = showNumbers ? nodeNumbers.get(id) : null;
 
   const stepCount = isSubprocess && nodeData.subMapId && project
     ? project.maps[nodeData.subMapId]?.nodes.length ?? 0
@@ -63,6 +67,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
         style={{ borderColor: color }}
         title={nodeData.description}
       >
+        {chapterNum && <span className="jnode__number">{chapterNum}</span>}
         <Handle type="target" position={Position.Left} className="jnode__handle" />
         <Handle type="source" position={Position.Right} id="right" className="jnode__handle" />
         <Handle type="source" position={Position.Bottom} id="bottom" className="jnode__handle" />
@@ -80,6 +85,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
       className={`jnode ${isSubprocess ? 'jnode--subprocess' : 'jnode--rect'} ${selected ? 'jnode--selected' : ''}`}
       style={{ borderColor: color, background: `${color}12` }}
     >
+      {chapterNum && <span className="jnode__number">{chapterNum}</span>}
       <Handle type="target" position={Position.Left} className="jnode__handle" />
       <Handle type="source" position={Position.Right} className="jnode__handle" />
       <div className="jnode__content">

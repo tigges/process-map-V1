@@ -708,6 +708,7 @@ body,
   align-items: center;
   justify-content: center;
   text-align: center;
+  position: relative;
 }
 
 .jnode:hover {
@@ -818,6 +819,27 @@ body,
 .jnode__open-btn:hover {
   opacity: 1;
   background: rgba(255, 255, 255, 0.5);
+}
+
+.jnode__number {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  background: var(--primary);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  line-height: 1.4;
+  z-index: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.jnode--diamond .jnode__number {
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%) rotate(-45deg);
 }
 
 .jnode__handle {
