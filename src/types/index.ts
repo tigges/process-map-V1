@@ -9,6 +9,13 @@ export interface ProcessMapProject {
   rootMapId: string;
   maps: Record<string, ProcessMap>;
   isDraft?: boolean;
+  folderId?: string;
+}
+
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  createdAt: string;
 }
 
 export interface ProcessMap {

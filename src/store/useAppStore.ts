@@ -12,15 +12,17 @@ import {
 import type {
   ProcessMapProject,
   ProcessMap,
+  ProjectFolder,
   JourneyNodeData,
   JourneyNodeType,
 } from '../types';
 import { NODE_TYPE_CONFIG } from '../types';
 import { createSampleProject } from '../data/sampleProject';
-import { saveProjects, loadProjects } from '../utils/storage';
+import { saveProjects, loadProjects, saveFolders, loadFolders } from '../utils/storage';
 
 interface AppState {
   projects: ProcessMapProject[];
+  folders: ProjectFolder[];
   activeProjectId: string | null;
   activeMapId: string | null;
   breadcrumb: string[];
@@ -64,6 +66,11 @@ interface AppState {
   finalizeProject: (id: string) => void;
   discardDraft: (id: string) => void;
 
+  // Folder management
+  createFolder: (name: string) => void;
+  deleteFolder: (id: string) => void;
+  moveProjectToFolder: (projectId: string, folderId: string | undefined) => void;
+
   // Persist
   persist: () => void;
 }
@@ -84,6 +91,7 @@ function updateMapInProject(
 
 export const useAppStore = create<AppState>((set, get) => ({
   projects: [],
+  folders: [],
   activeProjectId: null,
   activeMapId: null,
   breadcrumb: [],
@@ -103,13 +111,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   initFromStorage() {
     const projects = loadProjects();
+    const folders = loadFolders();
     if (projects.length > 0) {
+      const sorted = [...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
       set({
-        projects,
-        activeProjectId: projects[0].id,
-        activeMapId: projects[0].rootMapId,
-        breadcrumb: [projects[0].rootMapId],
+        projects: sorted,
+        folders,
+        activeProjectId: sorted[0].id,
+        activeMapId: sorted[0].rootMapId,
+        breadcrumb: [sorted[0].rootMapId],
       });
+    } else {
+      set({ folders });
     }
   },
 
@@ -401,6 +414,28 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   discardDraft(id) {
     get().deleteProject(id);
+  },
+
+  createFolder(name) {
+    const folder: ProjectFolder = { id: nanoid(), name, createdAt: new Date().toISOString() };
+    set((s) => ({ folders: [...s.folders, folder].sort((a, b) => a.name.localeCompare(b.name)) }));
+    saveFolders(get().folders);
+  },
+
+  deleteFolder(id) {
+    set((s) => ({
+      folders: s.folders.filter((f) => f.id !== id),
+      projects: s.projects.map((p) => p.folderId === id ? { ...p, folderId: undefined } : p),
+    }));
+    saveFolders(get().folders);
+    get().persist();
+  },
+
+  moveProjectToFolder(projectId, folderId) {
+    set((s) => ({
+      projects: s.projects.map((p) => p.id === projectId ? { ...p, folderId } : p),
+    }));
+    get().persist();
   },
 
   persist() {

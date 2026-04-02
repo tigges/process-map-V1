@@ -171,6 +171,77 @@ body,
   padding: 16px 0;
 }
 
+/* ===== Folders ===== */
+.sidebar__folder {
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.sidebar__folder-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  background: #f8fafc;
+  transition: background 0.15s;
+}
+
+.sidebar__folder-header:hover {
+  background: #f1f5f9;
+}
+
+.sidebar__folder-icon {
+  font-size: 10px;
+  color: var(--text-muted);
+  width: 12px;
+}
+
+.sidebar__folder-name {
+  flex: 1;
+}
+
+.sidebar__folder-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.sidebar__folder-delete {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  padding: 0 2px;
+}
+
+.sidebar__folder-header:hover .sidebar__folder-delete {
+  opacity: 1;
+}
+
+.sidebar__folder-delete:hover {
+  color: var(--danger);
+}
+
+.sidebar__folder-content {
+  border-top: 1px solid var(--border);
+  padding: 4px;
+}
+
+.sidebar__folder-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px;
+  font-style: italic;
+}
+
 .sidebar__actions {
   display: flex;
   flex-direction: column;
@@ -405,7 +476,7 @@ body,
 /* ===== Flow Chart Nodes ===== */
 .jnode {
   cursor: pointer;
-  transition: box-shadow 0.2s, transform 0.1s;
+  transition: box-shadow 0.2s;
   font-family: inherit;
   display: flex;
   align-items: center;
@@ -415,7 +486,6 @@ body,
 
 .jnode:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-  transform: translateY(-1px);
 }
 
 .jnode--selected {
@@ -453,6 +523,10 @@ body,
   padding: 8px;
   transform: rotate(45deg);
   background: #fef9c3 !important;
+}
+
+.jnode--diamond:hover {
+  transform: rotate(45deg);
 }
 
 .jnode--diamond .jnode__content {
@@ -502,10 +576,17 @@ body,
 }
 
 .jnode__handle {
-  width: 6px !important;
-  height: 6px !important;
+  width: 12px !important;
+  height: 12px !important;
   background: var(--primary) !important;
-  border: 1.5px solid white !important;
+  border: 2px solid white !important;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.jnode:hover .jnode__handle,
+.jnode--selected .jnode__handle {
+  opacity: 1;
 }
 
 /* ===== Inspector ===== */

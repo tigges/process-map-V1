@@ -15,7 +15,7 @@ export default function App() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const checkAuth = useAuthStore((s) => s.checkAuth);
 
-  const [showSidebar, setShowSidebar] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [showPalette, setShowPalette] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
 
