@@ -19,6 +19,7 @@ export default function ProjectSidebar() {
   const createFolder = useAppStore((s) => s.createFolder);
   const deleteFolder = useAppStore((s) => s.deleteFolder);
   const moveProjectToFolder = useAppStore((s) => s.moveProjectToFolder);
+  const persist = useAppStore((s) => s.persist);
 
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
@@ -27,13 +28,22 @@ export default function ProjectSidebar() {
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [dragProjectId, setDragProjectId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sortedProjects = [...projects].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   );
-  const unfolderedProjects = sortedProjects.filter((p) => !p.folderId);
+
+  const filteredProjects = search.trim()
+    ? sortedProjects.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
+    : sortedProjects;
+
+  const unfolderedProjects = filteredProjects.filter((p) => !p.folderId);
 
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders((prev) => {
@@ -57,6 +67,23 @@ export default function ProjectSidebar() {
     setNewFolderName('');
     setShowNewFolder(false);
   }, [newFolderName, createFolder]);
+
+  const handleRename = useCallback((projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
+    setRenamingId(projectId);
+    setRenameValue(project.name);
+  }, [projects]);
+
+  const handleSaveRename = useCallback(() => {
+    if (!renamingId || !renameValue.trim()) return;
+    const updated = projects.map((p) =>
+      p.id === renamingId ? { ...p, name: renameValue.trim(), updatedAt: new Date().toISOString() } : p,
+    );
+    useAppStore.setState({ projects: updated });
+    persist();
+    setRenamingId(null);
+  }, [renamingId, renameValue, projects, persist]);
 
   const handleExport = useCallback(() => {
     const json = exportActiveProject();
@@ -92,9 +119,11 @@ export default function ProjectSidebar() {
 
   const handleDropOnFolder = useCallback((e: DragEvent, folderId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     if (dragProjectId) {
       moveProjectToFolder(dragProjectId, folderId);
       setDragProjectId(null);
+      setDragOverFolderId(null);
       setExpandedFolders((prev) => new Set([...prev, folderId]));
     }
   }, [dragProjectId, moveProjectToFolder]);
@@ -104,6 +133,7 @@ export default function ProjectSidebar() {
     if (dragProjectId) {
       moveProjectToFolder(dragProjectId, undefined);
       setDragProjectId(null);
+      setDragOverFolderId(null);
     }
   }, [dragProjectId, moveProjectToFolder]);
 
@@ -115,15 +145,27 @@ export default function ProjectSidebar() {
       draggable
       onDragStart={(e) => handleDragStart(e, p.id)}
     >
-      <div className="sidebar__project-name">
-        {p.name}
-        {p.isDraft && <span className="sidebar__draft-badge">Draft</span>}
-      </div>
+      {renamingId === p.id ? (
+        <input
+          className="sidebar__rename-input"
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onBlur={handleSaveRename}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRename(); if (e.key === 'Escape') setRenamingId(null); }}
+          autoFocus
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <div className="sidebar__project-name" onDoubleClick={(e) => { e.stopPropagation(); handleRename(p.id); }}>
+          {p.name}
+          {p.isDraft && <span className="sidebar__draft-badge">Draft</span>}
+        </div>
+      )}
       <div className="sidebar__project-desc">{p.description}</div>
       {p.isDraft && p.id === activeProjectId && (
         <div className="sidebar__draft-actions">
           <button className="btn btn--primary btn--sm" onClick={(e) => { e.stopPropagation(); finalizeProject(p.id); }}>Finalize</button>
-          <button className="btn btn--danger btn--sm" onClick={(e) => { e.stopPropagation(); if (confirm('Discard this draft?')) discardDraft(p.id); }}>Discard</button>
+          <button className="btn btn--danger btn--sm" onClick={(e) => { e.stopPropagation(); if (confirm('Discard?')) discardDraft(p.id); }}>Discard</button>
         </div>
       )}
       <button className="sidebar__project-delete" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${p.name}"?`)) deleteProject(p.id); }} title="Delete">✕</button>
@@ -136,21 +178,34 @@ export default function ProjectSidebar() {
         <h2 className="sidebar__title">
           <span className="sidebar__logo">◈</span> ProcessMap
         </h2>
+        <input
+          className="sidebar__search"
+          placeholder="Search projects..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
 
       <div className="sidebar__section" onDragOver={(e) => e.preventDefault()} onDrop={handleDropOnRoot}>
         <h3 className="sidebar__section-title">Projects</h3>
 
         {folders.map((folder) => {
-          const folderProjects = sortedProjects.filter((p) => p.folderId === folder.id);
+          const folderProjects = filteredProjects.filter((p) => p.folderId === folder.id);
           const isExpanded = expandedFolders.has(folder.id);
+          const isDragOver = dragOverFolderId === folder.id;
           return (
-            <div key={folder.id} className="sidebar__folder" onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDropOnFolder(e, folder.id)}>
+            <div
+              key={folder.id}
+              className={`sidebar__folder ${isDragOver ? 'sidebar__folder--dragover' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(folder.id); }}
+              onDragLeave={() => setDragOverFolderId(null)}
+              onDrop={(e) => handleDropOnFolder(e, folder.id)}
+            >
               <div className="sidebar__folder-header" onClick={() => toggleFolder(folder.id)}>
                 <span className="sidebar__folder-icon">{isExpanded ? '▾' : '▸'}</span>
                 <span className="sidebar__folder-name">{folder.name}</span>
                 <span className="sidebar__folder-count">{folderProjects.length}</span>
-                <button className="sidebar__folder-delete" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete folder "${folder.name}"? Projects will be moved to root.`)) deleteFolder(folder.id); }}>✕</button>
+                <button className="sidebar__folder-delete" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete folder "${folder.name}"?`)) deleteFolder(folder.id); }}>✕</button>
               </div>
               {isExpanded && (
                 <div className="sidebar__folder-content">

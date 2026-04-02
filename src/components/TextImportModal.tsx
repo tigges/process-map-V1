@@ -21,39 +21,6 @@ which uses Claude to intelligently structure your content.`;
 
 type WizardStep = 'paste' | 'confirm-ai' | 'review';
 
-async function extractPdfText(file: File): Promise<string> {
-  const pdfjsLib = await import('pdfjs-dist');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.mjs',
-    import.meta.url,
-  ).toString();
-
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const pages: string[] = [];
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const lines: string[] = [];
-    let lastY: number | null = null;
-
-    for (const item of content.items) {
-      if (!('str' in item)) continue;
-      const textItem = item as { str: string; transform: number[] };
-      const y = Math.round(textItem.transform[5]);
-      if (lastY !== null && Math.abs(y - lastY) > 5) {
-        lines.push('\n');
-      }
-      lines.push(textItem.str);
-      lastY = y;
-    }
-    pages.push(lines.join(''));
-  }
-
-  return pages.join('\n\n');
-}
-
 export default function TextImportModal({ onClose }: TextImportModalProps) {
   const importProject = useAppStore((s) => s.importProject);
 
@@ -129,26 +96,46 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
+    const name = file.name.toLowerCase();
 
-    if (file.name.toLowerCase().endsWith('.pdf')) {
-      setLoading(true);
-      try {
-        const pdfText = await extractPdfText(file);
-        setText(pdfText);
-        if (!projectName) setProjectName(file.name.replace(/\.pdf$/i, ''));
-      } catch (err) {
-        console.error('PDF extraction failed:', err);
-        setText('Error: Could not extract text from PDF.');
-      } finally {
-        setLoading(false);
+    setLoading(true);
+    try {
+      let fileText = '';
+      if (name.endsWith('.pdf')) {
+        const pdfjsLib = await import('pdfjs-dist');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString();
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pages: string[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const lines: string[] = [];
+          let lastY: number | null = null;
+          for (const item of content.items) {
+            if (!('str' in item)) continue;
+            const textItem = item as { str: string; transform: number[] };
+            const y = Math.round(textItem.transform[5]);
+            if (lastY !== null && Math.abs(y - lastY) > 5) lines.push('\n');
+            lines.push(textItem.str);
+            lastY = y;
+          }
+          pages.push(lines.join(''));
+        }
+        fileText = pages.join('\n\n');
+      } else if (name.endsWith('.docx')) {
+        const { extractDocxText } = await import('../utils/exportImport');
+        fileText = await extractDocxText(file);
+      } else {
+        fileText = await file.text();
       }
-    } else {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setText(ev.target?.result as string);
-        if (!projectName) setProjectName(file.name.replace(/\.\w+$/, ''));
-      };
-      reader.readAsText(file);
+      setText(fileText);
+      if (!projectName) setProjectName(file.name.replace(/\.\w+$/, ''));
+    } catch (err) {
+      console.error('File import failed:', err);
+      setText('Error: Could not extract text from file.');
+    } finally {
+      setLoading(false);
     }
   }, [projectName]);
 
@@ -193,7 +180,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                 <label className="modal__label">
                   Source
                   <button className="btn btn--ghost btn--sm" onClick={handleFileUpload} style={{ marginLeft: 8 }}>
-                    Upload file (.txt, .md, .pdf)
+                    Upload file (.txt, .pdf, .docx)
                   </button>
                   <button className="btn btn--ghost btn--sm" onClick={handleCopyPrompt} style={{ marginLeft: 4 }}>
                     {promptCopied ? 'Copied!' : 'Copy Claude Prompt'}
@@ -210,7 +197,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".txt,.md,.text,.pdf"
+                  accept=".txt,.md,.text,.pdf,.docx"
                   style={{ display: 'none' }}
                   onChange={handleFileChange}
                 />

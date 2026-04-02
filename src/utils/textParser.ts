@@ -63,14 +63,65 @@ function extractTypePrefix(line: string): { type: JourneyNodeType | null; cleane
   return { type: null, cleaned: line };
 }
 
-function splitLabelDescription(text: string): { label: string; description: string } {
+const JUNK_PATTERNS = [
+  /^page\s+\d+$/i,
+  /^\d+\s*\/\s*\d+$/,
+  /^\d+$/,
+  /^https?:\/\//,
+  /^www\./,
+  /^copyright/i,
+  /^all rights reserved/i,
+  /^table of contents$/i,
+  /^contents$/i,
+  /^index$/i,
+  /^\.{3,}$/,
+  /^[.\-_=*#\s]{1,4}$/,
+  /^\(?\d+\)?$/,
+];
+
+function isJunkLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length < 3) return true;
+  if (trimmed.length < 5 && !/[a-zA-Z]{3,}/.test(trimmed)) return true;
+  for (const pattern of JUNK_PATTERNS) {
+    if (pattern.test(trimmed)) return true;
+  }
+  return false;
+}
+
+const DECISION_STARTERS = /^(if |when |does |should |will |can |is |are |has |have |check |verify |confirm |validate |ensure )/i;
+const ACTION_VERBS = /^(send |create |update |delete |add |remove |set |get |open |close |log |save |submit |upload |download |assign |escalate |notify |inform |redirect |advise |guide |process |handle |review |approve |reject |cancel |complete |reset |change |modify |request |contact |transfer |forward |post |click |select |enter |fill |search |navigate |enable |disable )/i;
+
+function classifyByContent(text: string): JourneyNodeType {
+  const lower = text.toLowerCase();
+  if (lower.includes('?')) return 'decision';
+  if (DECISION_STARTERS.test(lower)) return 'decision';
+  if (ACTION_VERBS.test(lower)) return 'action';
+  return 'action';
+}
+
+function smartSplitLabel(text: string): { label: string; description: string } {
   const colonIdx = text.indexOf(':');
-  if (colonIdx > 0 && colonIdx < 60) {
+  if (colonIdx > 0 && colonIdx < 50) {
     return { label: text.slice(0, colonIdx).trim(), description: text.slice(colonIdx + 1).trim() };
   }
   const dashIdx = text.indexOf(' - ');
-  if (dashIdx > 0 && dashIdx < 60) {
+  if (dashIdx > 0 && dashIdx < 50) {
     return { label: text.slice(0, dashIdx).trim(), description: text.slice(dashIdx + 3).trim() };
+  }
+  const commaIdx = text.indexOf(', ');
+  if (commaIdx > 8 && commaIdx < 50) {
+    return { label: text.slice(0, commaIdx).trim(), description: text.slice(commaIdx + 2).trim() };
+  }
+  const semicolonIdx = text.indexOf('; ');
+  if (semicolonIdx > 8 && semicolonIdx < 50) {
+    return { label: text.slice(0, semicolonIdx).trim(), description: text.slice(semicolonIdx + 2).trim() };
+  }
+  if (text.length > 50) {
+    const spaceIdx = text.lastIndexOf(' ', 45);
+    if (spaceIdx > 15) {
+      return { label: text.slice(0, spaceIdx).trim(), description: text.slice(spaceIdx + 1).trim() };
+    }
   }
   return { label: text.slice(0, 50), description: text.length > 50 ? text : '' };
 }
@@ -109,7 +160,7 @@ function cleanDashPrefix(line: string): string {
 
 export function parseTextToSteps(text: string): ParsedStep[] {
   const cleaned = stripAsciiArt(text);
-  const lines = cleaned.split('\n').filter((l) => l.trim().length > 0);
+  const lines = cleaned.split('\n').filter((l) => l.trim().length > 0).filter((l) => !isJunkLine(l));
   const steps: ParsedStep[] = [];
 
   let currentParent: ParsedStep | null = null;
@@ -121,7 +172,7 @@ export function parseTextToSteps(text: string): ParsedStep[] {
     if (isHeaderLine(trimmed)) {
       const content = cleanHeaderPrefix(trimmed);
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
-      const { label, description } = splitLabelDescription(afterPrefix);
+      const { label, description } = smartSplitLabel(afterPrefix);
 
       currentParent = {
         id: nanoid(),
@@ -135,8 +186,8 @@ export function parseTextToSteps(text: string): ParsedStep[] {
     } else if (currentParent) {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
-      const { label, description } = splitLabelDescription(afterPrefix);
-      const nodeType = explicitType ?? 'action';
+      const { label, description } = smartSplitLabel(afterPrefix);
+      const nodeType = explicitType ?? classifyByContent(afterPrefix);
 
       currentParent.children.push({
         id: nanoid(),
@@ -149,13 +200,13 @@ export function parseTextToSteps(text: string): ParsedStep[] {
     } else {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
-      const { label, description } = splitLabelDescription(afterPrefix);
+      const { label, description } = smartSplitLabel(afterPrefix);
 
       currentParent = {
         id: nanoid(),
         label,
         description,
-        nodeType: explicitType ?? 'action',
+        nodeType: explicitType ?? classifyByContent(afterPrefix),
         children: [],
         indent: 0,
       };
