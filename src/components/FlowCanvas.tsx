@@ -5,6 +5,7 @@ import {
   Controls,
   MiniMap,
   BackgroundVariant,
+  SelectionMode,
   useReactFlow,
   type ReactFlowInstance,
   type Node,
@@ -102,6 +103,10 @@ export default function FlowCanvas({ onNodeSelect }: { onNodeSelect?: () => void
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         fitView
+        selectionOnDrag
+        selectionMode={SelectionMode.Partial}
+        multiSelectionKeyCode="Shift"
+        deleteKeyCode="Delete"
         snapToGrid
         snapGrid={[20, 20]}
         defaultEdgeOptions={{
