@@ -15,6 +15,7 @@ export default function App() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const checkAuth = useAuthStore((s) => s.checkAuth);
 
+  const [showSidebar, setShowSidebar] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
 
@@ -29,9 +30,11 @@ export default function App() {
     <LoginGate>
       <ReactFlowProvider>
         <div className="app">
-          <ProjectSidebar />
+          {showSidebar && <ProjectSidebar />}
           <div className="app__main">
             <Toolbar
+              showSidebar={showSidebar}
+              onToggleSidebar={() => setShowSidebar((v) => !v)}
               showPalette={showPalette}
               onTogglePalette={() => setShowPalette((v) => !v)}
               showInspector={showInspector}
