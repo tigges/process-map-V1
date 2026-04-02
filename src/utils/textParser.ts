@@ -13,11 +13,8 @@ export interface ParsedStep {
 }
 
 const NODE_COLORS: Record<JourneyNodeType, string> = {
-  start: '#22c55e',
-  action: '#3b82f6',
-  decision: '#eab308',
-  end: '#ef4444',
-  subprocess: '#64748b',
+  start: '#22c55e', action: '#3b82f6', decision: '#eab308',
+  end: '#ef4444', subprocess: '#64748b',
 };
 
 const CATEGORY_COLORS = [
@@ -26,20 +23,89 @@ const CATEGORY_COLORS = [
   '#84cc16', '#e11d48', '#7c3aed', '#059669',
 ];
 
+// ───── TEXT CLEANUP PIPELINE (shared by all import methods) ─────
+
 const ASCII_ART = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬▼▲►◄●○■□▪▫◆◇★☆✓✗←↑↓⇒⇐⇑⇓]/g;
 const ARROW_CHAR = /→/g;
 const SEPARATOR_LINE = /^[\s─═\-_~*#]{4,}$/;
 const BOX_LINE = /^[\s]*[┌┐└┘├┤│║╔╗╚╝╠╣].*/;
+const PAGE_MARKER = /^--\s*\d+\s*(of|\/)\s*\d+\s*--$/i;
+const QUOTED_BLOCK = /^[""].{40,}[""]$/;
 
-function stripAsciiArt(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => !SEPARATOR_LINE.test(line))
-    .filter((line) => !BOX_LINE.test(line))
-    .map((line) => line.replace(ASCII_ART, ' ').replace(ARROW_CHAR, ' -> ').replace(/\s{2,}/g, ' ').trim())
-    .filter((line) => line.length > 0)
-    .join('\n');
+const JUNK_PATTERNS = [
+  /^page\s+\d+$/i, /^\d+\s*\/\s*\d+$/, /^\d+$/,
+  /^https?:\/\//, /^www\./, /^copyright/i, /^all rights reserved/i,
+  /^table of contents$/i, /^contents$/i, /^index$/i,
+  /^\.{3,}$/, /^[.\-_=*#\s]{1,4}$/, /^\(?\d+\)?$/,
+  /^(version|revision|rev|v)\s*[\d.]+/i,
+  /^(author|created by|written by|prepared by|updated by|by\s)/i,
+  /^(date|last updated|modified|effective)/i,
+  /^(confidential|internal use|draft|do not distribute)/i,
+  /^(training team|training department|hr department|cstrainingteam)/i,
+  /^(note:|disclaimer:|warning:)/i,
+  /^end of document$/i,
+  /^finance tab$/i,
+];
+
+function isJunkLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length < 3) return true;
+  if (trimmed.length < 5 && !/[a-zA-Z]{3,}/.test(trimmed)) return true;
+  if (PAGE_MARKER.test(trimmed)) return true;
+  if (QUOTED_BLOCK.test(trimmed)) return true;
+  if (trimmed.startsWith('"') && trimmed.length > 80) return true;
+  for (const pattern of JUNK_PATTERNS) {
+    if (pattern.test(trimmed)) return true;
+  }
+  return false;
 }
+
+function cleanupText(text: string): string {
+  const lines = text.split('\n');
+  const cleaned: string[] = [];
+  let inQuote = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (SEPARATOR_LINE.test(trimmed)) continue;
+    if (BOX_LINE.test(trimmed)) continue;
+    if (PAGE_MARKER.test(trimmed)) continue;
+
+    const processed = trimmed
+      .replace(ASCII_ART, ' ')
+      .replace(ARROW_CHAR, ' -> ')
+      .replace(/\t+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    if (processed.startsWith('"') || inQuote) {
+      inQuote = !processed.endsWith('"');
+      continue;
+    }
+
+    if (!processed || isJunkLine(processed)) continue;
+    cleaned.push(processed);
+  }
+
+  return cleaned.join('\n');
+}
+
+// ───── AUTO-DETECT IF TEXT IS ALREADY CLAUDE-FORMATTED ─────
+
+function isClaudeFormatted(text: string): boolean {
+  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length < 3) return false;
+  let numbered = 0;
+  let tagged = 0;
+  for (const line of lines) {
+    if (/^\d+[.)]\s/.test(line.trim())) numbered++;
+    if (/^\s*-\s*\[[\w\s-]+\]/.test(line)) tagged++;
+  }
+  return numbered >= 2 && tagged >= 3 && (tagged / lines.length) > 0.3;
+}
+
+// ───── TYPE DETECTION ─────
 
 const EXPLICIT_TAGS: Record<string, JourneyNodeType> = {
   'start': 'start', 'begin': 'start',
@@ -63,40 +129,9 @@ function extractTypePrefix(line: string): { type: JourneyNodeType | null; cleane
   return { type: null, cleaned: line };
 }
 
-const JUNK_PATTERNS = [
-  /^page\s+\d+$/i,
-  /^\d+\s*\/\s*\d+$/,
-  /^\d+$/,
-  /^https?:\/\//,
-  /^www\./,
-  /^copyright/i,
-  /^all rights reserved/i,
-  /^table of contents$/i,
-  /^contents$/i,
-  /^index$/i,
-  /^\.{3,}$/,
-  /^[.\-_=*#\s]{1,4}$/,
-  /^\(?\d+\)?$/,
-  /^(version|revision|rev|v)\s*[\d.]+/i,
-  /^(author|created by|written by|prepared by|updated by)/i,
-  /^(date|last updated|modified|effective)/i,
-  /^(confidential|internal use|draft|do not distribute)/i,
-  /^(training team|training department|hr department)/i,
-  /^(note:|disclaimer:|warning:)/i,
-];
-
-function isJunkLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (trimmed.length < 3) return true;
-  if (trimmed.length < 5 && !/[a-zA-Z]{3,}/.test(trimmed)) return true;
-  for (const pattern of JUNK_PATTERNS) {
-    if (pattern.test(trimmed)) return true;
-  }
-  return false;
-}
-
 const DECISION_STARTERS = /^(if |when |does |should |will |can |is |are |has |have |check |verify |confirm |validate |ensure )/i;
 const ACTION_VERBS = /^(send |create |update |delete |add |remove |set |get |open |close |log |save |submit |upload |download |assign |escalate |notify |inform |redirect |advise |guide |process |handle |review |approve |reject |cancel |complete |reset |change |modify |request |contact |transfer |forward |post |click |select |enter |fill |search |navigate |enable |disable )/i;
+const FLOW_ARROW = / -> /;
 
 function classifyByContent(text: string): JourneyNodeType {
   const lower = text.toLowerCase();
@@ -106,39 +141,37 @@ function classifyByContent(text: string): JourneyNodeType {
   return 'action';
 }
 
+// ───── LABEL EXTRACTION ─────
+
 function smartSplitLabel(text: string): { label: string; description: string } {
+  if (FLOW_ARROW.test(text)) {
+    const parts = text.split(' -> ');
+    return { label: parts[0].trim(), description: parts.slice(1).join(' -> ').trim() };
+  }
   const colonIdx = text.indexOf(':');
   if (colonIdx > 0 && colonIdx < 50) {
     return { label: text.slice(0, colonIdx).trim(), description: text.slice(colonIdx + 1).trim() };
   }
-  const dashIdx = text.indexOf(' - ');
+  const dashIdx = text.indexOf(' — ');
   if (dashIdx > 0 && dashIdx < 50) {
     return { label: text.slice(0, dashIdx).trim(), description: text.slice(dashIdx + 3).trim() };
   }
-  const commaIdx = text.indexOf(', ');
-  if (commaIdx > 8 && commaIdx < 50) {
-    return { label: text.slice(0, commaIdx).trim(), description: text.slice(commaIdx + 2).trim() };
+  const simpleDash = text.indexOf(' - ');
+  if (simpleDash > 0 && simpleDash < 50) {
+    return { label: text.slice(0, simpleDash).trim(), description: text.slice(simpleDash + 3).trim() };
   }
   if (text.length > 50) {
     const spaceIdx = text.lastIndexOf(' ', 45);
-    if (spaceIdx > 15) {
-      return { label: text.slice(0, spaceIdx).trim(), description: text.slice(spaceIdx + 1).trim() };
-    }
+    if (spaceIdx > 15) return { label: text.slice(0, spaceIdx).trim(), description: text.slice(spaceIdx + 1).trim() };
   }
   return { label: text.slice(0, 50), description: text.length > 50 ? text : '' };
 }
 
-function isNumberedLine(line: string): boolean {
-  return /^\d+[.)]\s/.test(line.trim());
-}
+// ───── LINE CLASSIFICATION ─────
 
-function isTaggedLine(line: string): boolean {
-  return /^\[[\w\s-]+\]\s/.test(line.trim());
-}
-
-function isDashedLine(line: string): boolean {
-  return /^[\s]*[-*•]\s/.test(line);
-}
+function isNumberedLine(line: string): boolean { return /^\d+[.)]\s/.test(line.trim()); }
+function isTaggedLine(line: string): boolean { return /^\[[\w\s-]+\]\s/.test(line.trim()); }
+function isDashedLine(line: string): boolean { return /^[\s]*[-*•]\s/.test(line); }
 
 function isHeaderLine(line: string): boolean {
   const trimmed = line.trim();
@@ -146,20 +179,32 @@ function isHeaderLine(line: string): boolean {
   if (isDashedLine(trimmed) || isTaggedLine(trimmed)) return false;
   if (trimmed === trimmed.toUpperCase() && trimmed.length > 3 && /[A-Z]/.test(trimmed)) return true;
   if (/^#{1,3}\s/.test(trimmed)) return true;
+  if (/^[\d.]+\s+[A-Z]/.test(trimmed) && trimmed.length < 80) return true;
   return false;
 }
 
 function cleanHeaderPrefix(line: string): string {
-  return line.trim().replace(/^\d+[.)]\s*/, '').replace(/^#{1,3}\s*/, '').trim();
+  return line.trim().replace(/^\d+[.)]\s*/, '').replace(/^[\d.]+\s+/, '').replace(/^#{1,3}\s*/, '').trim();
 }
 
-function cleanDashPrefix(line: string): string {
-  return line.trim().replace(/^[-*•]\s*/, '');
+function cleanDashPrefix(line: string): string { return line.trim().replace(/^[-*•]\s*/, ''); }
+
+// ───── ACTOR DETECTION ─────
+
+function detectActor(text: string): string {
+  const lower = text.toLowerCase();
+  if (/\b(player|customer|user)\b/.test(lower)) return 'Player';
+  if (/\b(agent|support|cs |we )\b/.test(lower)) return 'Agent';
+  if (/\b(sm|shift manager|manager)\b/.test(lower)) return 'SM';
+  if (/\b(kyc|verification|finance)\b/.test(lower)) return 'System';
+  return '';
 }
+
+// ───── MAIN PARSER ─────
 
 export function parseTextToSteps(text: string): ParsedStep[] {
-  const cleaned = stripAsciiArt(text);
-  const lines = cleaned.split('\n').filter((l) => l.trim().length > 0).filter((l) => !isJunkLine(l));
+  const cleaned = cleanupText(text);
+  const lines = cleaned.split('\n').filter((l) => l.trim().length > 0);
   const steps: ParsedStep[] = [];
   let currentParent: ParsedStep | null = null;
 
@@ -180,9 +225,11 @@ export function parseTextToSteps(text: string): ParsedStep[] {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = smartSplitLabel(afterPrefix);
+      const nodeType = explicitType ?? classifyByContent(afterPrefix);
+      const actor = detectActor(afterPrefix);
+      const desc = actor ? `[${actor}] ${description}` : description;
       currentParent.children.push({
-        id: nanoid(), label, description,
-        nodeType: explicitType ?? classifyByContent(afterPrefix), children: [], indent: 1,
+        id: nanoid(), label, description: desc, nodeType, children: [], indent: 1,
       });
     } else {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
@@ -205,10 +252,67 @@ export function parseTextToSteps(text: string): ParsedStep[] {
   return steps;
 }
 
+// ───── NORMALIZATION (shared post-parse layer) ─────
+
+function normalizeSteps(steps: ParsedStep[]): ParsedStep[] {
+  let result = steps.filter((s) => s.label.trim().length > 0);
+
+  const merged: ParsedStep[] = [];
+  const seen = new Map<string, number>();
+
+  for (const step of result) {
+    const key = step.label.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (seen.has(key)) {
+      const existing = merged[seen.get(key)!];
+      existing.children.push(...step.children);
+      if (!existing.description && step.description) existing.description = step.description;
+    } else {
+      seen.set(key, merged.length);
+      merged.push({ ...step, children: [...step.children] });
+    }
+  }
+
+  result = merged;
+
+  const MAX_CHILDREN = 12;
+  for (const step of result) {
+    if (step.children.length > MAX_CHILDREN) {
+      const overflow = step.children.splice(MAX_CHILDREN);
+      const subGroup: ParsedStep = {
+        id: nanoid(),
+        label: `${step.label} (continued)`,
+        description: `${overflow.length} additional steps`,
+        nodeType: 'subprocess',
+        children: overflow,
+        indent: 1,
+      };
+      step.children.push(subGroup);
+    }
+  }
+
+  const tiny = result.filter((s) => s.children.length <= 1 && s.nodeType !== 'start' && s.nodeType !== 'end');
+  if (tiny.length > 3 && tiny.length > result.length / 2) {
+    const real = result.filter((s) => s.children.length > 1 || s.nodeType === 'start' || s.nodeType === 'end');
+    if (real.length > 0) {
+      const misc: ParsedStep = {
+        id: nanoid(), label: 'Other Items',
+        description: `${tiny.length} miscellaneous items`,
+        nodeType: 'subprocess', children: tiny.flatMap((t) => t.children.length > 0 ? t.children : [t]),
+        indent: 0,
+      };
+      real.push(misc);
+      return real;
+    }
+  }
+
+  return result;
+}
+
+// ───── FLOW MAP BUILDER ─────
+
 function makeEdge(sourceId: string, targetId: string, label?: string, sourceHandle?: string): Edge {
   return {
-    id: `e-${sourceId}-${targetId}`,
-    source: sourceId, target: targetId, label,
+    id: `e-${sourceId}-${targetId}`, source: sourceId, target: targetId, label,
     type: 'smoothstep', animated: true,
     style: { stroke: '#94a3b8', strokeWidth: 2 },
     ...(label ? { labelStyle: { fontSize: 11, fontWeight: 600 } } : {}),
@@ -258,6 +362,8 @@ function buildFlowMap(steps: ParsedStep[]): { nodes: Node<JourneyNodeData>[]; ed
   return layoutSmartFlow(rawNodes, rawEdges);
 }
 
+// ───── CLUSTERING ─────
+
 const CLUSTER_KEYWORDS: Record<string, string[]> = {
   'Account': ['account', 'registration', 'login', 'password', 'profile', 'username', 'email change', 'phone change', 'personal info', 'duplicate', 'reopening', 'closure', 'close', 'frozen', 'reopen'],
   'Financial': ['deposit', 'withdrawal', 'payment', 'cashier', 'commission', 'wager', 'rollover', 'arn', 'noda', 'credit card', 'bank', 'funds', 'pending', 'complete'],
@@ -273,8 +379,7 @@ const CLUSTER_KEYWORDS: Record<string, string[]> = {
 
 function classifyStep(step: ParsedStep): string {
   const text = `${step.label} ${step.description}`.toLowerCase();
-  let bestCluster = '';
-  let bestScore = 0;
+  let bestCluster = ''; let bestScore = 0;
   for (const [cluster, keywords] of Object.entries(CLUSTER_KEYWORDS)) {
     let score = 0;
     for (const kw of keywords) { if (text.includes(kw)) score++; }
@@ -295,9 +400,10 @@ function isGraveyardItem(step: ParsedStep): boolean {
   return false;
 }
 
+// ───── PROJECT BUILDER ─────
+
 function buildOverviewNode(
-  nodeId: string, label: string, desc: string, color: string,
-  subMapId: string | undefined,
+  nodeId: string, label: string, desc: string, color: string, subMapId: string | undefined,
 ): Node<JourneyNodeData> {
   return {
     id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
@@ -306,30 +412,29 @@ function buildOverviewNode(
 }
 
 export function stepsToProject(
-  steps: ParsedStep[],
-  projectName: string,
-  isDraft: boolean,
-  skipClustering = false,
+  steps: ParsedStep[], projectName: string, isDraft: boolean, skipClustering = false,
 ): ProcessMapProject {
   const projectId = nanoid();
   const rootMapId = nanoid();
   const maps: Record<string, ProcessMap> = {};
 
+  const normalized = normalizeSteps(steps);
+
   const validSteps: ParsedStep[] = [];
   const graveyardSteps: ParsedStep[] = [];
-
-  for (const step of steps) {
-    if (isGraveyardItem(step)) {
-      graveyardSteps.push(step);
-    } else {
-      validSteps.push(step);
-    }
+  for (const step of normalized) {
+    if (isGraveyardItem(step)) graveyardSteps.push(step);
+    else validSteps.push(step);
   }
+
+  const shouldSkipClustering = skipClustering || isClaudeFormatted(
+    validSteps.map((s) => `${s.indent === 0 ? '1. ' : '- [action] '}${s.label}`).join('\n'),
+  );
 
   const rawOverviewNodes: Node<JourneyNodeData>[] = [];
   let colorIdx = 0;
 
-  if (skipClustering) {
+  if (shouldSkipClustering) {
     for (const step of validSteps) {
       const nodeId = nanoid();
       const hasChildren = step.children.length > 0;
@@ -351,76 +456,45 @@ export function stepsToProject(
             if (child.children.length > 0) {
               childSubMapId = nanoid();
               const { nodes: cNodes, edges: cEdges } = buildFlowMap(child.children);
-              maps[childSubMapId] = {
-                id: childSubMapId, name: child.label,
-                description: child.description || '', parentMapId: subMapId, parentNodeId: childNodeId,
-                nodes: cNodes, edges: cEdges,
-              };
+              maps[childSubMapId] = { id: childSubMapId, name: child.label, description: child.description || '', parentMapId: subMapId, parentNodeId: childNodeId, nodes: cNodes, edges: cEdges };
             }
-            subOverviewNodes.push(buildOverviewNode(
-              childNodeId, child.label,
+            subOverviewNodes.push(buildOverviewNode(childNodeId, child.label,
               child.description ? `${child.description} (${child.children.length} steps)` : `${child.children.length} steps`,
-              childColor, childSubMapId,
-            ));
+              childColor, childSubMapId));
           }
           const cols = Math.min(Math.ceil(Math.sqrt(subOverviewNodes.length)), 3);
-          const positioned = subOverviewNodes.map((n, i) => ({
-            ...n, position: { x: (i % cols) * 280, y: Math.floor(i / cols) * 160 },
-          }));
-          maps[subMapId] = {
-            id: subMapId, name: step.label, description: step.description || '',
-            parentMapId: rootMapId, parentNodeId: nodeId,
-            nodes: positioned, edges: [],
-          };
+          const positioned = subOverviewNodes.map((n, i) => ({ ...n, position: { x: (i % cols) * 280, y: Math.floor(i / cols) * 160 } }));
+          maps[subMapId] = { id: subMapId, name: step.label, description: step.description || '', parentMapId: rootMapId, parentNodeId: nodeId, nodes: positioned, edges: [] };
         } else {
           const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
-          maps[subMapId] = {
-            id: subMapId, name: step.label, description: step.description || '',
-            parentMapId: rootMapId, parentNodeId: nodeId,
-            nodes: subNodes, edges: subEdges,
-          };
+          maps[subMapId] = { id: subMapId, name: step.label, description: step.description || '', parentMapId: rootMapId, parentNodeId: nodeId, nodes: subNodes, edges: subEdges };
         }
       }
 
-      rawOverviewNodes.push(buildOverviewNode(
-        nodeId, step.label,
+      rawOverviewNodes.push(buildOverviewNode(nodeId, step.label,
         step.description ? `${step.description}${hasChildren ? ` (${step.children.length} steps)` : ''}` : hasChildren ? `${step.children.length} steps` : '',
-        hasChildren ? categoryColor : NODE_COLORS[step.nodeType], subMapId,
-      ));
+        hasChildren ? categoryColor : NODE_COLORS[step.nodeType], subMapId));
     }
   } else {
     const clustered: Record<string, ParsedStep[]> = {};
     const unclustered: ParsedStep[] = [];
-
     for (const step of validSteps) {
       const cluster = classifyStep(step);
-      if (cluster) {
-        if (!clustered[cluster]) clustered[cluster] = [];
-        clustered[cluster].push(step);
-      } else {
-        unclustered.push(step);
-      }
+      if (cluster) { if (!clustered[cluster]) clustered[cluster] = []; clustered[cluster].push(step); }
+      else unclustered.push(step);
     }
 
     for (const [clusterName, clusterSteps] of Object.entries(clustered)) {
-      const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
-      colorIdx++;
-
+      const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length]; colorIdx++;
       if (clusterSteps.length === 1 && clusterSteps[0].children.length > 0) {
-        const step = clusterSteps[0];
-        const nodeId = nanoid();
-        const subMapId = nanoid();
+        const step = clusterSteps[0]; const nodeId = nanoid(); const subMapId = nanoid();
         const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
         maps[subMapId] = { id: subMapId, name: step.label, description: step.description || '', parentMapId: rootMapId, parentNodeId: nodeId, nodes: subNodes, edges: subEdges };
         rawOverviewNodes.push(buildOverviewNode(nodeId, step.label, `${step.description || ''} (${step.children.length} steps)`.trim(), categoryColor, subMapId));
       } else {
-        const nodeId = nanoid();
-        const subMapId = nanoid();
+        const nodeId = nanoid(); const subMapId = nanoid();
         const allChildren: ParsedStep[] = [];
-        for (const step of clusterSteps) {
-          if (step.children.length > 0) allChildren.push(...step.children);
-          else allChildren.push(step);
-        }
+        for (const step of clusterSteps) { if (step.children.length > 0) allChildren.push(...step.children); else allChildren.push(step); }
         const { nodes: subNodes, edges: subEdges } = buildFlowMap(allChildren.length > 0 ? allChildren : clusterSteps);
         maps[subMapId] = { id: subMapId, name: clusterName, description: `${clusterSteps.length} topics`, parentMapId: rootMapId, parentNodeId: nodeId, nodes: subNodes, edges: subEdges };
         rawOverviewNodes.push(buildOverviewNode(nodeId, clusterName, `${clusterSteps.map((s) => s.label).join(', ').slice(0, 80)} (${allChildren.length || clusterSteps.length} steps)`, categoryColor, subMapId));
@@ -428,10 +502,8 @@ export function stepsToProject(
     }
 
     for (const step of unclustered) {
-      const nodeId = nanoid();
-      const hasChildren = step.children.length > 0;
-      const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
-      colorIdx++;
+      const nodeId = nanoid(); const hasChildren = step.children.length > 0;
+      const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length]; colorIdx++;
       let subMapId: string | undefined;
       if (hasChildren) {
         subMapId = nanoid();
@@ -445,8 +517,7 @@ export function stepsToProject(
   }
 
   if (graveyardSteps.length > 0) {
-    const graveyardId = nanoid();
-    const graveyardMapId = nanoid();
+    const graveyardId = nanoid(); const graveyardMapId = nanoid();
     const graveyardNodes: Node<JourneyNodeData>[] = graveyardSteps.map((step, i) => ({
       id: nanoid(), type: 'journeyNode' as const,
       position: { x: (i % 4) * 200, y: Math.floor(i / 4) * 100 },
@@ -463,12 +534,8 @@ export function stepsToProject(
 
   maps[rootMapId] = { id: rootMapId, name: 'Overview', description: 'Top-level categories', parentMapId: null, parentNodeId: null, nodes: overviewNodes, edges: [] };
 
-  return {
-    id: projectId, name: projectName,
-    description: isDraft ? 'Draft — review and finalize' : 'Imported from text',
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    rootMapId, maps, isDraft,
-  };
+  return { id: projectId, name: projectName, description: isDraft ? 'Draft — review and finalize' : 'Imported from text',
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), rootMapId, maps, isDraft };
 }
 
 export function parseTextToProject(text: string, projectName: string): ProcessMapProject {
