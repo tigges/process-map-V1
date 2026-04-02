@@ -83,7 +83,9 @@ export default function FlowCanvas({ onNodeSelect }: { onNodeSelect?: () => void
   const activeMap = useAppStore((s) => s.getActiveMap());
   const project = useAppStore((s) => s.getActiveProject());
   const selectedNodeId = useAppStore((s) => s.selectedNodeId);
+  const breadcrumb = useAppStore((s) => s.breadcrumb);
   const [previewMapId, setPreviewMapId] = useState<string | null>(null);
+  const depth = breadcrumb.length - 1;
 
   const computedPreviewId = useMemo(() => {
     if (!selectedNodeId || !activeMap || !project) return null;
@@ -112,7 +114,7 @@ export default function FlowCanvas({ onNodeSelect }: { onNodeSelect?: () => void
 
   if (previewMap) {
     return (
-      <div className="flow-canvas flow-canvas--split">
+      <div className="flow-canvas flow-canvas--split" style={{ ['--depth' as string]: depth }}>
         <div className="flow-canvas__main">
           <FlowPane map={activeMap} onNodeSelect={onNodeSelect} />
         </div>
@@ -132,7 +134,7 @@ export default function FlowCanvas({ onNodeSelect }: { onNodeSelect?: () => void
   }
 
   return (
-    <div className="flow-canvas">
+    <div className="flow-canvas" style={{ ['--depth' as string]: depth }}>
       <FlowPane map={activeMap} onNodeSelect={onNodeSelect} />
     </div>
   );

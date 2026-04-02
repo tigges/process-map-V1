@@ -387,53 +387,82 @@ body,
   border-radius: 12px;
 }
 
-/* ===== Breadcrumb ===== */
-.breadcrumb {
+/* ===== Context Bar (Breadcrumb) ===== */
+.context-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 13px;
+  gap: 6px;
+  font-size: 12px;
 }
 
-.breadcrumb__back {
-  background: none;
-  border: 1px solid var(--border);
+.context-bar__back {
+  background: var(--primary);
+  color: white;
+  border: none;
   border-radius: var(--radius-sm);
-  padding: 2px 8px;
+  padding: 3px 8px;
   font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  color: var(--primary);
-  margin-right: 6px;
   transition: background 0.15s;
 }
 
-.breadcrumb__back:hover {
-  background: #eef2ff;
+.context-bar__back:hover {
+  background: var(--primary-hover);
 }
 
-.breadcrumb__sep {
-  color: var(--border);
+.context-bar__path {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.context-bar__sep {
+  color: #cbd5e1;
   margin: 0 2px;
+  font-size: 14px;
 }
 
-.breadcrumb__link {
+.context-bar__link {
   background: none;
   border: none;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--primary);
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
+  font-family: inherit;
 }
 
-.breadcrumb__link:hover:not(:disabled) {
+.context-bar__link:hover:not(:disabled) {
   background: #eef2ff;
 }
 
-.breadcrumb__link--active {
+.context-bar__link--active {
   color: var(--text);
+  background: #f1f5f9;
   cursor: default;
   font-weight: 600;
+}
+
+.context-bar__count {
+  display: inline-block;
+  background: var(--primary);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.context-bar__depth {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 8px;
 }
 
 /* ===== Node Palette ===== */
@@ -503,6 +532,21 @@ body,
 .flow-canvas {
   flex: 1;
   position: relative;
+  background: var(--bg);
+}
+
+.flow-canvas[style*="--depth: 1"] {
+  background: #f0f4ff;
+}
+
+.flow-canvas[style*="--depth: 2"] {
+  background: #e8f0fe;
+}
+
+.flow-canvas[style*="--depth: 3"],
+.flow-canvas[style*="--depth: 4"],
+.flow-canvas[style*="--depth: 5"] {
+  background: #e0e8fd;
 }
 
 .flow-canvas--split {
