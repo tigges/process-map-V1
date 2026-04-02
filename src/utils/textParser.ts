@@ -234,53 +234,204 @@ function buildFlowMap(
   return layoutWithDagre(rawNodes, rawEdges, 'LR');
 }
 
+const CLUSTER_KEYWORDS: Record<string, string[]> = {
+  'Account': ['account', 'registration', 'login', 'password', 'profile', 'username', 'email change', 'phone change', 'personal info', 'duplicate', 'reopening', 'closure', 'close', 'frozen', 'reopen'],
+  'Financial': ['deposit', 'withdrawal', 'payment', 'cashier', 'commission', 'wager', 'rollover', 'arn', 'noda', 'credit card', 'bank', 'funds', 'pending', 'complete'],
+  'Verification': ['verification', 'kyc', 'document', 'dvs', 'identity', 'id', 'selfie', 'proof'],
+  'Bonuses': ['bonus', 'promo', 'cashback', 'welcome', 'wagering', 'crab', 'hunter', 'abuser', 'free spin', 'reward'],
+  'Security': ['security', 'fraud', 'gdpr', 'data', 'hacked', 'suspicious', 'underage', 'complaint', 'refund', 'missing win'],
+  'Responsible Gaming': ['self-harm', 'gambling addiction', 'responsible', 'helpline', 'self-exclusion', 'care'],
+  'VIP': ['vip', 'platinum', 'diamond', 'gold', 'silver', 'bronze', 'loyalty'],
+  'Technical': ['browser', 'cache', 'ad blocker', 'pop-up', '3ds', 'technical', 'error', 'bug', 'unresponsive'],
+  'Marketing': ['marketing', 'subscription', 'unsubscribe', 'email campaign', 'newsletter', 'promo'],
+  'Escalation': ['escalat', 'slack', 'channel', 'manager', 'sm ', 'sport_request'],
+};
+
+function classifyStep(step: ParsedStep): string {
+  const text = `${step.label} ${step.description}`.toLowerCase();
+  let bestCluster = '';
+  let bestScore = 0;
+
+  for (const [cluster, keywords] of Object.entries(CLUSTER_KEYWORDS)) {
+    let score = 0;
+    for (const kw of keywords) {
+      if (text.includes(kw)) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestCluster = cluster;
+    }
+  }
+
+  return bestScore > 0 ? bestCluster : '';
+}
+
+function isGraveyardItem(step: ParsedStep): boolean {
+  const label = step.label.trim();
+  if (label.length <= 3) return true;
+  if (/^\d+$/.test(label)) return true;
+  if (/^[.\-_=*#]+$/.test(label)) return true;
+  if (label.toLowerCase() === 'undefined' || label.toLowerCase() === 'null') return true;
+  if (!step.description && step.children.length === 0 && label.length < 5 && !/[a-zA-Z]{3,}/.test(label)) return true;
+  return false;
+}
+
 export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft: boolean): ProcessMapProject {
   const projectId = nanoid();
   const rootMapId = nanoid();
   const maps: Record<string, ProcessMap> = {};
 
-  const phases = steps;
+  const validSteps: ParsedStep[] = [];
+  const graveyardSteps: ParsedStep[] = [];
+
+  for (const step of steps) {
+    if (isGraveyardItem(step)) {
+      graveyardSteps.push(step);
+    } else {
+      validSteps.push(step);
+    }
+  }
+
+  const clustered: Record<string, ParsedStep[]> = {};
+  const unclustered: ParsedStep[] = [];
+
+  for (const step of validSteps) {
+    const cluster = classifyStep(step);
+    if (cluster) {
+      if (!clustered[cluster]) clustered[cluster] = [];
+      clustered[cluster].push(step);
+    } else {
+      unclustered.push(step);
+    }
+  }
 
   const rawOverviewNodes: Node<JourneyNodeData>[] = [];
+  let colorIdx = 0;
 
-  phases.forEach((phase, i) => {
+  for (const [clusterName, clusterSteps] of Object.entries(clustered)) {
+    const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+    colorIdx++;
+
+    if (clusterSteps.length === 1 && clusterSteps[0].children.length > 0) {
+      const step = clusterSteps[0];
+      const nodeId = nanoid();
+      const subMapId = nanoid();
+      const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
+      maps[subMapId] = {
+        id: subMapId, name: step.label,
+        description: step.description || `Details for ${step.label}`,
+        parentMapId: rootMapId, parentNodeId: nodeId,
+        nodes: subNodes, edges: subEdges,
+      };
+      rawOverviewNodes.push({
+        id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
+        data: {
+          label: step.label,
+          description: `${step.description || ''} (${step.children.length} steps)`.trim(),
+          nodeType: 'subprocess', color: categoryColor, subMapId,
+        },
+      });
+    } else {
+      const nodeId = nanoid();
+      const subMapId = nanoid();
+
+      const allChildren: ParsedStep[] = [];
+      for (const step of clusterSteps) {
+        if (step.children.length > 0) {
+          allChildren.push(...step.children);
+        } else {
+          allChildren.push(step);
+        }
+      }
+
+      const { nodes: subNodes, edges: subEdges } = buildFlowMap(
+        allChildren.length > 0 ? allChildren : clusterSteps,
+      );
+      maps[subMapId] = {
+        id: subMapId, name: clusterName,
+        description: `${clusterSteps.length} topics in this category`,
+        parentMapId: rootMapId, parentNodeId: nodeId,
+        nodes: subNodes, edges: subEdges,
+      };
+
+      const stepCount = allChildren.length || clusterSteps.length;
+      rawOverviewNodes.push({
+        id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
+        data: {
+          label: clusterName,
+          description: `${clusterSteps.map((s) => s.label).join(', ').slice(0, 80)} (${stepCount} steps)`,
+          nodeType: 'subprocess', color: categoryColor, subMapId,
+        },
+      });
+    }
+  }
+
+  for (const step of unclustered) {
     const nodeId = nanoid();
-    const hasChildren = phase.children.length > 0;
-    const categoryColor = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+    const hasChildren = step.children.length > 0;
+    const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+    colorIdx++;
 
     let subMapId: string | undefined;
     if (hasChildren) {
       subMapId = nanoid();
-      const { nodes: subNodes, edges: subEdges } = buildFlowMap(phase.children);
+      const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
       maps[subMapId] = {
-        id: subMapId,
-        name: phase.label,
-        description: phase.description || `Details for ${phase.label}`,
-        parentMapId: rootMapId,
-        parentNodeId: nodeId,
-        nodes: subNodes,
-        edges: subEdges,
+        id: subMapId, name: step.label,
+        description: step.description || `Details for ${step.label}`,
+        parentMapId: rootMapId, parentNodeId: nodeId,
+        nodes: subNodes, edges: subEdges,
       };
     }
-
-    const childCount = phase.children.length;
-    const desc = phase.description
-      ? `${phase.description}${hasChildren ? ` (${childCount} steps)` : ''}`
-      : hasChildren ? `${childCount} steps` : '';
 
     rawOverviewNodes.push({
       id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
       data: {
-        label: phase.label,
-        description: desc,
-        nodeType: hasChildren ? 'subprocess' : phase.nodeType,
-        color: hasChildren ? categoryColor : NODE_COLORS[phase.nodeType],
+        label: step.label,
+        description: step.description
+          ? `${step.description}${hasChildren ? ` (${step.children.length} steps)` : ''}`
+          : hasChildren ? `${step.children.length} steps` : '',
+        nodeType: hasChildren ? 'subprocess' : step.nodeType,
+        color: hasChildren ? categoryColor : NODE_COLORS[step.nodeType],
         subMapId,
       },
     });
-  });
+  }
 
-  const { nodes: overviewNodes } = layoutWithDagre(rawOverviewNodes, [], 'TB');
+  if (graveyardSteps.length > 0) {
+    const graveyardId = nanoid();
+    const graveyardMapId = nanoid();
+    const graveyardNodes: Node<JourneyNodeData>[] = graveyardSteps.map((step, i) => ({
+      id: nanoid(), type: 'journeyNode' as const,
+      position: { x: (i % 4) * 200, y: Math.floor(i / 4) * 100 },
+      data: { label: step.label, description: step.description, nodeType: 'action' as const, color: '#94a3b8' },
+    }));
+
+    maps[graveyardMapId] = {
+      id: graveyardMapId, name: 'Unclassified Items',
+      description: `${graveyardSteps.length} items that could not be categorized — review and reassign`,
+      parentMapId: rootMapId, parentNodeId: graveyardId,
+      nodes: graveyardNodes, edges: [],
+    };
+
+    rawOverviewNodes.push({
+      id: graveyardId, type: 'journeyNode', position: { x: 0, y: 0 },
+      data: {
+        label: 'Unclassified Items',
+        description: `${graveyardSteps.length} items to review`,
+        nodeType: 'subprocess', color: '#94a3b8', subMapId: graveyardMapId,
+      },
+    });
+  }
+
+  const columns = Math.min(Math.ceil(Math.sqrt(rawOverviewNodes.length)), 4);
+  const overviewNodes = rawOverviewNodes.map((node, i) => ({
+    ...node,
+    position: {
+      x: (i % columns) * 280,
+      y: Math.floor(i / columns) * 160,
+    },
+  }));
 
   maps[rootMapId] = {
     id: rootMapId,
