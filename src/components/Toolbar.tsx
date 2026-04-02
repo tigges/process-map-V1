@@ -29,6 +29,7 @@ interface SearchResult {
 export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onTogglePalette, showInspector, onToggleInspector, showNumbers, onToggleNumbers, searchTerm, onSearchTermChange }: ToolbarProps) {
   const project = useAppStore((s) => s.getActiveProject());
   const activeMap = useAppStore((s) => s.getActiveMap());
+  const focusNode = useAppStore((s) => s.focusNode);
   const canvasRef = useRef<HTMLElement | null>(null);
   const [showSearch, setShowSearch] = useState(false);
 
@@ -86,24 +87,11 @@ export default function Toolbar({ showSidebar, onToggleSidebar, showPalette, onT
 
     const map = proj.maps[result.mapId];
     if (!map) return;
-
-    const breadcrumb: string[] = [];
-    let current: string | null = result.mapId;
-    while (current) {
-      breadcrumb.unshift(current);
-      current = proj.maps[current]?.parentMapId ?? null;
-    }
-
-    useAppStore.setState({
-      activeMapId: result.mapId,
-      breadcrumb,
-      selectedNodeId: result.nodeId,
-      focusNodeId: result.nodeId,
-    });
+    focusNode(result.mapId, result.nodeId);
 
     onSearchTermChange('');
     setShowSearch(false);
-  }, [project, onSearchTermChange]);
+  }, [project, focusNode, onSearchTermChange]);
 
   return (
     <div className="toolbar">

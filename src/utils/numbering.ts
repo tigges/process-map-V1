@@ -20,21 +20,25 @@ export function generateNodeNumbers(project: ProcessMapProject): Map<string, str
     if (d.nodeType === 'subprocess' && d.subMapId) {
       const subMap = project.maps[d.subMapId];
       if (!subMap) return;
+      let subStepIndex = 0;
 
-      subMap.nodes.forEach((subNode, j) => {
+      subMap.nodes.forEach((subNode) => {
         const sd = subNode.data as JourneyNodeData;
         if (sd.nodeType === 'start' || sd.nodeType === 'end') return;
-        const stepNum = `${catNum}.${j + 1}`;
+        subStepIndex += 1;
+        const stepNum = `${catNum}.${subStepIndex}`;
         numberMap.set(subNode.id, stepNum);
 
         if (sd.nodeType === 'subprocess' && sd.subMapId) {
           const deepMap = project.maps[sd.subMapId];
           if (!deepMap) return;
+          let deepStepIndex = 0;
 
-          deepMap.nodes.forEach((deepNode, k) => {
+          deepMap.nodes.forEach((deepNode) => {
             const dd = deepNode.data as JourneyNodeData;
             if (dd.nodeType === 'start' || dd.nodeType === 'end') return;
-            numberMap.set(deepNode.id, `${stepNum}.${k + 1}`);
+            deepStepIndex += 1;
+            numberMap.set(deepNode.id, `${stepNum}.${deepStepIndex}`);
           });
         }
       });

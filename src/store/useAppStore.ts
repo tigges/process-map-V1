@@ -42,6 +42,7 @@ interface AppState {
 
   // Map navigation
   navigateToMap: (mapId: string) => void;
+  focusNode: (mapId: string, nodeId: string) => void;
   navigateUp: () => void;
   navigateToBreadcrumb: (index: number) => void;
 
@@ -203,6 +204,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       breadcrumb: [...s.breadcrumb, mapId],
       selectedNodeId: null,
     }));
+  },
+
+  focusNode(mapId, nodeId) {
+    const project = get().getActiveProject();
+    if (!project || !project.maps[mapId]) return;
+
+    const breadcrumb: string[] = [];
+    let current: string | null = mapId;
+    while (current) {
+      breadcrumb.unshift(current);
+      current = project.maps[current]?.parentMapId ?? null;
+    }
+
+    set({
+      activeMapId: mapId,
+      breadcrumb,
+      selectedNodeId: nodeId,
+      focusNodeId: nodeId,
+    });
   },
 
   navigateUp() {

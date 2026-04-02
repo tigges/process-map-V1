@@ -9,7 +9,7 @@ import NodeInspector from './components/NodeInspector';
 import { useAppStore } from './store/useAppStore';
 import { useAuthStore } from './store/useAuthStore';
 import { generateNodeNumbers } from './utils/numbering';
-import { NumbersContext, ShowNumbersContext, SearchTermContext } from './contexts';
+import { NumbersContext, NumberToNodeContext, ShowNumbersContext, SearchTermContext } from './contexts';
 import './App.css';
 
 export default function App() {
@@ -30,6 +30,17 @@ export default function App() {
     if (!project) return new Map<string, string>();
     return generateNodeNumbers(project);
   }, [project]);
+  const numberToNode = useMemo(() => {
+    if (!project) return new Map<string, { mapId: string; nodeId: string }>();
+    const lookup = new Map<string, { mapId: string; nodeId: string }>();
+    for (const [mapId, map] of Object.entries(project.maps)) {
+      for (const node of map.nodes) {
+        const number = nodeNumbers.get(node.id);
+        if (number) lookup.set(number, { mapId, nodeId: node.id });
+      }
+    }
+    return lookup;
+  }, [project, nodeNumbers]);
 
   useEffect(() => {
     checkAuth();
@@ -39,34 +50,35 @@ export default function App() {
   return (
     <LoginGate>
       <NumbersContext.Provider value={nodeNumbers}>
-        <ShowNumbersContext.Provider value={showNumbers}>
-          <SearchTermContext.Provider value={searchTerm}>
-            <ReactFlowProvider>
-              <div className="app">
-                {showSidebar && <ProjectSidebar />}
-                <div className="app__main">
-                  <Toolbar
-                    showSidebar={showSidebar}
-                    onToggleSidebar={() => setShowSidebar((v) => !v)}
-                    showPalette={showPalette}
-                    onTogglePalette={() => setShowPalette((v) => !v)}
-                    showInspector={showInspector}
-                    onToggleInspector={() => setShowInspector((v) => !v)}
-                    showNumbers={showNumbers}
-                    onToggleNumbers={() => setShowNumbers((v) => !v)}
-                    searchTerm={searchTerm}
-                    onSearchTermChange={setSearchTerm}
-                  />
-                <div className="app__workspace">
-                  {activeProjectId && showPalette && <NodePalette />}
-                  <FlowCanvas onNodeSelect={openInspector} />
-                  {showInspector && <NodeInspector />}
+        <NumberToNodeContext.Provider value={numberToNode}>
+          <ShowNumbersContext.Provider value={showNumbers}>
+            <SearchTermContext.Provider value={searchTerm}>
+              <ReactFlowProvider>
+                <div className="app">
+                  {showSidebar && <ProjectSidebar />}
+                  <div className="app__main">
+                    <Toolbar
+                      showSidebar={showSidebar}
+                      onToggleSidebar={() => setShowSidebar((v) => !v)}
+                      showPalette={showPalette}
+                      onTogglePalette={() => setShowPalette((v) => !v)}
+                      showInspector={showInspector}
+                      onToggleInspector={() => setShowInspector((v) => !v)}
+                      showNumbers={showNumbers}
+                      onToggleNumbers={() => setShowNumbers((v) => !v)}
+                      searchTerm={searchTerm}
+                      onSearchTermChange={setSearchTerm}
+                    />
+                  <div className="app__workspace">
+                    {activeProjectId && showPalette && <NodePalette />}
+                    <FlowCanvas onNodeSelect={openInspector} />
+                    {showInspector && <NodeInspector />}
+                  </div>
                 </div>
-              </div>
-            </div>
-          </ReactFlowProvider>
-          </SearchTermContext.Provider>
-        </ShowNumbersContext.Provider>
+              </ReactFlowProvider>
+            </SearchTermContext.Provider>
+          </ShowNumbersContext.Provider>
+        </NumberToNodeContext.Provider>
       </NumbersContext.Provider>
     </LoginGate>
   );

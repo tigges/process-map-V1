@@ -1,9 +1,9 @@
-import { memo, useCallback, useContext } from 'react';
+import { memo, useCallback, useContext, useMemo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { JourneyNodeData } from '../types';
 import { NODE_TYPE_CONFIG } from '../types';
 import { useAppStore } from '../store/useAppStore';
-import { NumbersContext, ShowNumbersContext, SearchTermContext } from '../contexts';
+import { NumbersContext, NumberToNodeContext, ShowNumbersContext, SearchTermContext } from '../contexts';
 
 function highlightText(text: string, term: string): React.ReactNode {
   if (!term || term.length < 2) return text;
@@ -18,6 +18,8 @@ function highlightText(text: string, term: string): React.ReactNode {
   );
 }
 
+const CROSS_REF_PATTERN = /\b\d+(?:\.\d+)+\b/g;
+
 function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as JourneyNodeData;
   const navigateToMap = useAppStore((s) => s.navigateToMap);
@@ -25,6 +27,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const config = NODE_TYPE_CONFIG[nodeData.nodeType];
   const project = useAppStore((s) => s.getActiveProject());
   const nodeNumbers = useContext(NumbersContext);
+  const numberIndex = useContext(NumberToNodeContext);
   const showNumbers = useContext(ShowNumbersContext);
   const searchTerm = useContext(SearchTermContext);
 
@@ -45,6 +48,14 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
     }
   }, [nodeData, navigateToMap]);
 
+  const focusNode = useAppStore((s) => s.focusNode);
+  const handleCrossRefClick = useCallback((e: React.MouseEvent, ref: string) => {
+    e.stopPropagation();
+    const target = numberIndex.get(ref);
+    if (!target) return;
+    focusNode(target.mapId, target.nodeId);
+  }, [numberIndex, focusNode]);
+
   const color = nodeData.color || config.color;
   const isSubprocess = nodeData.nodeType === 'subprocess';
   const isDecision = nodeData.nodeType === 'decision';
@@ -59,6 +70,50 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
   const stepCount = isSubprocess && nodeData.subMapId && project
     ? project.maps[nodeData.subMapId]?.nodes.length ?? 0
     : 0;
+
+  const descriptionWithRefs = useMemo(() => {
+    if (!nodeData.description) return null;
+
+    let cursor = 0;
+    const parts: React.ReactNode[] = [];
+    const matches = [...nodeData.description.matchAll(CROSS_REF_PATTERN)];
+
+    if (matches.length === 0) {
+      return highlightText(nodeData.description, searchTerm);
+    }
+
+    for (const match of matches) {
+      const full = match[0];
+      const idx = match.index ?? 0;
+      if (idx > cursor) {
+        parts.push(highlightText(nodeData.description.slice(cursor, idx), searchTerm));
+      }
+
+      const target = numberIndex.get(full);
+      if (target) {
+        parts.push(
+          <button
+            key={`${id}-${idx}-${full}`}
+            className="jnode__xref"
+            onClick={(e) => handleCrossRefClick(e, full)}
+            title={`Go to step ${full}`}
+          >
+            {full}
+          </button>,
+        );
+      } else {
+        parts.push(highlightText(full, searchTerm));
+      }
+
+      cursor = idx + full.length;
+    }
+
+    if (cursor < nodeData.description.length) {
+      parts.push(highlightText(nodeData.description.slice(cursor), searchTerm));
+    }
+
+    return parts;
+  }, [nodeData.description, searchTerm, numberIndex, id, handleCrossRefClick]);
 
   if (isTerminal) {
     return (
@@ -108,7 +163,7 @@ function JourneyNodeComponent({ id, data, selected }: NodeProps) {
       <div className="jnode__content">
         <div className="jnode__label" style={{ color }}>{highlightText(nodeData.label, searchTerm)}</div>
         {nodeData.description && (
-          <div className="jnode__desc">{highlightText(nodeData.description, searchTerm)}</div>
+          <div className="jnode__desc">{descriptionWithRefs}</div>
         )}
         {isSubprocess && nodeData.subMapId && (
           <button className="jnode__open-btn" onClick={handleOpenClick} style={{ color }}>
