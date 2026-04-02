@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import type { ProcessMapProject, ProcessMap, JourneyNodeData, JourneyNodeType } from '../types';
 import type { Node, Edge } from '@xyflow/react';
-import { layoutWithDagre } from './layoutEngine';
+import { layoutSmartFlow } from './layoutEngine';
 
 export interface ParsedStep {
   id: string;
@@ -231,7 +231,7 @@ function buildFlowMap(
   });
   rawEdges.push(makeEdge(prevId, endId));
 
-  return layoutWithDagre(rawNodes, rawEdges, 'LR');
+  return layoutSmartFlow(rawNodes, rawEdges);
 }
 
 const CLUSTER_KEYWORDS: Record<string, string[]> = {
