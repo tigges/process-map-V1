@@ -31,6 +31,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [useAi, setUseAi] = useState(false);
+  const [wasAiParsed, setWasAiParsed] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -57,6 +58,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       setText(structured);
       const steps = parseTextToSteps(structured);
       setParsedSteps(steps);
+      setWasAiParsed(true);
       setWizardStep('review');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AI parse failed');
@@ -76,17 +78,17 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
 
   const handleImportAsDraft = useCallback(() => {
     if (parsedSteps.length === 0) return;
-    const project = stepsToProject(parsedSteps, projectName || 'Imported Journey', true);
+    const project = stepsToProject(parsedSteps, projectName || 'Imported Journey', true, wasAiParsed);
     importProject(JSON.stringify(project));
     onClose();
-  }, [parsedSteps, projectName, importProject, onClose]);
+  }, [parsedSteps, projectName, importProject, onClose, wasAiParsed]);
 
   const handleImportFinal = useCallback(() => {
     if (parsedSteps.length === 0) return;
-    const project = stepsToProject(parsedSteps, projectName || 'Imported Journey', false);
+    const project = stepsToProject(parsedSteps, projectName || 'Imported Journey', false, wasAiParsed);
     importProject(JSON.stringify(project));
     onClose();
-  }, [parsedSteps, projectName, importProject, onClose]);
+  }, [parsedSteps, projectName, importProject, onClose, wasAiParsed]);
 
   const handleFileUpload = useCallback(() => {
     fileInputRef.current?.click();

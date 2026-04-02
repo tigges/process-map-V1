@@ -57,8 +57,8 @@ export function layoutWithDagre(
   return { nodes: layoutedNodes, edges };
 }
 
-const COL_WIDTH = 200;
-const ROW_HEIGHT = 80;
+const COL_WIDTH = 220;
+const ROW_HEIGHT = 90;
 const MAX_STACK = 5;
 
 export function layoutSmartFlow(

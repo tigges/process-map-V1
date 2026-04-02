@@ -77,6 +77,12 @@ const JUNK_PATTERNS = [
   /^\.{3,}$/,
   /^[.\-_=*#\s]{1,4}$/,
   /^\(?\d+\)?$/,
+  /^(version|revision|rev|v)\s*[\d.]+/i,
+  /^(author|created by|written by|prepared by|updated by)/i,
+  /^(date|last updated|modified|effective)/i,
+  /^(confidential|internal use|draft|do not distribute)/i,
+  /^(training team|training department|hr department)/i,
+  /^(note:|disclaimer:|warning:)/i,
 ];
 
 function isJunkLine(line: string): boolean {
@@ -113,10 +119,6 @@ function smartSplitLabel(text: string): { label: string; description: string } {
   if (commaIdx > 8 && commaIdx < 50) {
     return { label: text.slice(0, commaIdx).trim(), description: text.slice(commaIdx + 2).trim() };
   }
-  const semicolonIdx = text.indexOf('; ');
-  if (semicolonIdx > 8 && semicolonIdx < 50) {
-    return { label: text.slice(0, semicolonIdx).trim(), description: text.slice(semicolonIdx + 2).trim() };
-  }
   if (text.length > 50) {
     const spaceIdx = text.lastIndexOf(' ', 45);
     if (spaceIdx > 15) {
@@ -148,10 +150,7 @@ function isHeaderLine(line: string): boolean {
 }
 
 function cleanHeaderPrefix(line: string): string {
-  return line.trim()
-    .replace(/^\d+[.)]\s*/, '')
-    .replace(/^#{1,3}\s*/, '')
-    .trim();
+  return line.trim().replace(/^\d+[.)]\s*/, '').replace(/^#{1,3}\s*/, '').trim();
 }
 
 function cleanDashPrefix(line: string): string {
@@ -162,7 +161,6 @@ export function parseTextToSteps(text: string): ParsedStep[] {
   const cleaned = stripAsciiArt(text);
   const lines = cleaned.split('\n').filter((l) => l.trim().length > 0).filter((l) => !isJunkLine(l));
   const steps: ParsedStep[] = [];
-
   let currentParent: ParsedStep | null = null;
 
   for (const rawLine of lines) {
@@ -173,42 +171,26 @@ export function parseTextToSteps(text: string): ParsedStep[] {
       const content = cleanHeaderPrefix(trimmed);
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = smartSplitLabel(afterPrefix);
-
       currentParent = {
-        id: nanoid(),
-        label,
-        description,
-        nodeType: explicitType ?? 'subprocess',
-        children: [],
-        indent: 0,
+        id: nanoid(), label, description,
+        nodeType: explicitType ?? 'subprocess', children: [], indent: 0,
       };
       steps.push(currentParent);
     } else if (currentParent) {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = smartSplitLabel(afterPrefix);
-      const nodeType = explicitType ?? classifyByContent(afterPrefix);
-
       currentParent.children.push({
-        id: nanoid(),
-        label,
-        description,
-        nodeType,
-        children: [],
-        indent: 1,
+        id: nanoid(), label, description,
+        nodeType: explicitType ?? classifyByContent(afterPrefix), children: [], indent: 1,
       });
     } else {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = smartSplitLabel(afterPrefix);
-
       currentParent = {
-        id: nanoid(),
-        label,
-        description,
-        nodeType: explicitType ?? classifyByContent(afterPrefix),
-        children: [],
-        indent: 0,
+        id: nanoid(), label, description,
+        nodeType: explicitType ?? classifyByContent(afterPrefix), children: [], indent: 0,
       };
       steps.push(currentParent);
     }
@@ -226,20 +208,15 @@ export function parseTextToSteps(text: string): ParsedStep[] {
 function makeEdge(sourceId: string, targetId: string, label?: string, sourceHandle?: string): Edge {
   return {
     id: `e-${sourceId}-${targetId}`,
-    source: sourceId,
-    target: targetId,
-    label,
-    type: 'smoothstep',
-    animated: true,
+    source: sourceId, target: targetId, label,
+    type: 'smoothstep', animated: true,
     style: { stroke: '#94a3b8', strokeWidth: 2 },
     ...(label ? { labelStyle: { fontSize: 11, fontWeight: 600 } } : {}),
     ...(sourceHandle ? { sourceHandle } : {}),
   };
 }
 
-function buildFlowMap(
-  steps: ParsedStep[],
-): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
+function buildFlowMap(steps: ParsedStep[]): { nodes: Node<JourneyNodeData>[]; edges: Edge[] } {
   const rawNodes: Node<JourneyNodeData>[] = [];
   const rawEdges: Edge[] = [];
 
@@ -255,19 +232,15 @@ function buildFlowMap(
     const nodeId = nanoid();
     rawNodes.push({
       id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
-      data: {
-        label: step.label, description: step.description,
-        nodeType: step.nodeType, color: NODE_COLORS[step.nodeType],
-      },
+      data: { label: step.label, description: step.description, nodeType: step.nodeType, color: NODE_COLORS[step.nodeType] },
     });
     rawEdges.push(makeEdge(prevId, nodeId));
 
     if (step.nodeType === 'decision') {
       const branchId = nanoid();
-      const branchLabel = step.description ? step.description.slice(0, 40) : 'Alt path';
       rawNodes.push({
         id: branchId, type: 'journeyNode', position: { x: 0, y: 0 },
-        data: { label: branchLabel, description: '', nodeType: 'action', color: NODE_COLORS.action },
+        data: { label: step.description ? step.description.slice(0, 40) : 'Alt path', description: '', nodeType: 'action', color: NODE_COLORS.action },
       });
       rawEdges.push(makeEdge(nodeId, branchId, 'No', 'bottom'));
     }
@@ -302,18 +275,11 @@ function classifyStep(step: ParsedStep): string {
   const text = `${step.label} ${step.description}`.toLowerCase();
   let bestCluster = '';
   let bestScore = 0;
-
   for (const [cluster, keywords] of Object.entries(CLUSTER_KEYWORDS)) {
     let score = 0;
-    for (const kw of keywords) {
-      if (text.includes(kw)) score++;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestCluster = cluster;
-    }
+    for (const kw of keywords) { if (text.includes(kw)) score++; }
+    if (score > bestScore) { bestScore = score; bestCluster = cluster; }
   }
-
   return bestScore > 0 ? bestCluster : '';
 }
 
@@ -324,10 +290,27 @@ function isGraveyardItem(step: ParsedStep): boolean {
   if (/^[.\-_=*#]+$/.test(label)) return true;
   if (label.toLowerCase() === 'undefined' || label.toLowerCase() === 'null') return true;
   if (!step.description && step.children.length === 0 && label.length < 5 && !/[a-zA-Z]{3,}/.test(label)) return true;
+  const lower = label.toLowerCase();
+  if (/^(note|disclaimer|warning|version|revision|by |prepared|training)/.test(lower)) return true;
   return false;
 }
 
-export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft: boolean): ProcessMapProject {
+function buildOverviewNode(
+  nodeId: string, label: string, desc: string, color: string,
+  subMapId: string | undefined,
+): Node<JourneyNodeData> {
+  return {
+    id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
+    data: { label, description: desc, nodeType: 'subprocess', color, subMapId },
+  };
+}
+
+export function stepsToProject(
+  steps: ParsedStep[],
+  projectName: string,
+  isDraft: boolean,
+  skipClustering = false,
+): ProcessMapProject {
   const projectId = nanoid();
   const rootMapId = nanoid();
   const maps: Record<string, ProcessMap> = {};
@@ -343,110 +326,122 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
     }
   }
 
-  const clustered: Record<string, ParsedStep[]> = {};
-  const unclustered: ParsedStep[] = [];
-
-  for (const step of validSteps) {
-    const cluster = classifyStep(step);
-    if (cluster) {
-      if (!clustered[cluster]) clustered[cluster] = [];
-      clustered[cluster].push(step);
-    } else {
-      unclustered.push(step);
-    }
-  }
-
   const rawOverviewNodes: Node<JourneyNodeData>[] = [];
   let colorIdx = 0;
 
-  for (const [clusterName, clusterSteps] of Object.entries(clustered)) {
-    const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
-    colorIdx++;
-
-    if (clusterSteps.length === 1 && clusterSteps[0].children.length > 0) {
-      const step = clusterSteps[0];
+  if (skipClustering) {
+    for (const step of validSteps) {
       const nodeId = nanoid();
-      const subMapId = nanoid();
-      const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
-      maps[subMapId] = {
-        id: subMapId, name: step.label,
-        description: step.description || `Details for ${step.label}`,
-        parentMapId: rootMapId, parentNodeId: nodeId,
-        nodes: subNodes, edges: subEdges,
-      };
-      rawOverviewNodes.push({
-        id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
-        data: {
-          label: step.label,
-          description: `${step.description || ''} (${step.children.length} steps)`.trim(),
-          nodeType: 'subprocess', color: categoryColor, subMapId,
-        },
-      });
-    } else {
-      const nodeId = nanoid();
-      const subMapId = nanoid();
+      const hasChildren = step.children.length > 0;
+      const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+      colorIdx++;
 
-      const allChildren: ParsedStep[] = [];
-      for (const step of clusterSteps) {
-        if (step.children.length > 0) {
-          allChildren.push(...step.children);
+      let subMapId: string | undefined;
+      if (hasChildren) {
+        subMapId = nanoid();
+        const allSubprocess = step.children.every((c) => c.children.length > 0 || c.nodeType === 'subprocess');
+
+        if (allSubprocess && step.children.length > 1) {
+          const subOverviewNodes: Node<JourneyNodeData>[] = [];
+          for (const child of step.children) {
+            const childNodeId = nanoid();
+            const childColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+            colorIdx++;
+            let childSubMapId: string | undefined;
+            if (child.children.length > 0) {
+              childSubMapId = nanoid();
+              const { nodes: cNodes, edges: cEdges } = buildFlowMap(child.children);
+              maps[childSubMapId] = {
+                id: childSubMapId, name: child.label,
+                description: child.description || '', parentMapId: subMapId, parentNodeId: childNodeId,
+                nodes: cNodes, edges: cEdges,
+              };
+            }
+            subOverviewNodes.push(buildOverviewNode(
+              childNodeId, child.label,
+              child.description ? `${child.description} (${child.children.length} steps)` : `${child.children.length} steps`,
+              childColor, childSubMapId,
+            ));
+          }
+          const cols = Math.min(Math.ceil(Math.sqrt(subOverviewNodes.length)), 3);
+          const positioned = subOverviewNodes.map((n, i) => ({
+            ...n, position: { x: (i % cols) * 280, y: Math.floor(i / cols) * 160 },
+          }));
+          maps[subMapId] = {
+            id: subMapId, name: step.label, description: step.description || '',
+            parentMapId: rootMapId, parentNodeId: nodeId,
+            nodes: positioned, edges: [],
+          };
         } else {
-          allChildren.push(step);
+          const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
+          maps[subMapId] = {
+            id: subMapId, name: step.label, description: step.description || '',
+            parentMapId: rootMapId, parentNodeId: nodeId,
+            nodes: subNodes, edges: subEdges,
+          };
         }
       }
 
-      const { nodes: subNodes, edges: subEdges } = buildFlowMap(
-        allChildren.length > 0 ? allChildren : clusterSteps,
-      );
-      maps[subMapId] = {
-        id: subMapId, name: clusterName,
-        description: `${clusterSteps.length} topics in this category`,
-        parentMapId: rootMapId, parentNodeId: nodeId,
-        nodes: subNodes, edges: subEdges,
-      };
-
-      const stepCount = allChildren.length || clusterSteps.length;
-      rawOverviewNodes.push({
-        id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
-        data: {
-          label: clusterName,
-          description: `${clusterSteps.map((s) => s.label).join(', ').slice(0, 80)} (${stepCount} steps)`,
-          nodeType: 'subprocess', color: categoryColor, subMapId,
-        },
-      });
+      rawOverviewNodes.push(buildOverviewNode(
+        nodeId, step.label,
+        step.description ? `${step.description}${hasChildren ? ` (${step.children.length} steps)` : ''}` : hasChildren ? `${step.children.length} steps` : '',
+        hasChildren ? categoryColor : NODE_COLORS[step.nodeType], subMapId,
+      ));
     }
-  }
+  } else {
+    const clustered: Record<string, ParsedStep[]> = {};
+    const unclustered: ParsedStep[] = [];
 
-  for (const step of unclustered) {
-    const nodeId = nanoid();
-    const hasChildren = step.children.length > 0;
-    const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
-    colorIdx++;
-
-    let subMapId: string | undefined;
-    if (hasChildren) {
-      subMapId = nanoid();
-      const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
-      maps[subMapId] = {
-        id: subMapId, name: step.label,
-        description: step.description || `Details for ${step.label}`,
-        parentMapId: rootMapId, parentNodeId: nodeId,
-        nodes: subNodes, edges: subEdges,
-      };
+    for (const step of validSteps) {
+      const cluster = classifyStep(step);
+      if (cluster) {
+        if (!clustered[cluster]) clustered[cluster] = [];
+        clustered[cluster].push(step);
+      } else {
+        unclustered.push(step);
+      }
     }
 
-    rawOverviewNodes.push({
-      id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
-      data: {
-        label: step.label,
-        description: step.description
-          ? `${step.description}${hasChildren ? ` (${step.children.length} steps)` : ''}`
-          : hasChildren ? `${step.children.length} steps` : '',
-        nodeType: hasChildren ? 'subprocess' : step.nodeType,
-        color: hasChildren ? categoryColor : NODE_COLORS[step.nodeType],
-        subMapId,
-      },
-    });
+    for (const [clusterName, clusterSteps] of Object.entries(clustered)) {
+      const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+      colorIdx++;
+
+      if (clusterSteps.length === 1 && clusterSteps[0].children.length > 0) {
+        const step = clusterSteps[0];
+        const nodeId = nanoid();
+        const subMapId = nanoid();
+        const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
+        maps[subMapId] = { id: subMapId, name: step.label, description: step.description || '', parentMapId: rootMapId, parentNodeId: nodeId, nodes: subNodes, edges: subEdges };
+        rawOverviewNodes.push(buildOverviewNode(nodeId, step.label, `${step.description || ''} (${step.children.length} steps)`.trim(), categoryColor, subMapId));
+      } else {
+        const nodeId = nanoid();
+        const subMapId = nanoid();
+        const allChildren: ParsedStep[] = [];
+        for (const step of clusterSteps) {
+          if (step.children.length > 0) allChildren.push(...step.children);
+          else allChildren.push(step);
+        }
+        const { nodes: subNodes, edges: subEdges } = buildFlowMap(allChildren.length > 0 ? allChildren : clusterSteps);
+        maps[subMapId] = { id: subMapId, name: clusterName, description: `${clusterSteps.length} topics`, parentMapId: rootMapId, parentNodeId: nodeId, nodes: subNodes, edges: subEdges };
+        rawOverviewNodes.push(buildOverviewNode(nodeId, clusterName, `${clusterSteps.map((s) => s.label).join(', ').slice(0, 80)} (${allChildren.length || clusterSteps.length} steps)`, categoryColor, subMapId));
+      }
+    }
+
+    for (const step of unclustered) {
+      const nodeId = nanoid();
+      const hasChildren = step.children.length > 0;
+      const categoryColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+      colorIdx++;
+      let subMapId: string | undefined;
+      if (hasChildren) {
+        subMapId = nanoid();
+        const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
+        maps[subMapId] = { id: subMapId, name: step.label, description: step.description || '', parentMapId: rootMapId, parentNodeId: nodeId, nodes: subNodes, edges: subEdges };
+      }
+      rawOverviewNodes.push(buildOverviewNode(nodeId, step.label,
+        step.description ? `${step.description}${hasChildren ? ` (${step.children.length} steps)` : ''}` : hasChildren ? `${step.children.length} steps` : '',
+        hasChildren ? categoryColor : NODE_COLORS[step.nodeType], subMapId));
+    }
   }
 
   if (graveyardSteps.length > 0) {
@@ -457,52 +452,22 @@ export function stepsToProject(steps: ParsedStep[], projectName: string, isDraft
       position: { x: (i % 4) * 200, y: Math.floor(i / 4) * 100 },
       data: { label: step.label, description: step.description, nodeType: 'action' as const, color: '#94a3b8' },
     }));
-
-    maps[graveyardMapId] = {
-      id: graveyardMapId, name: 'Unclassified Items',
-      description: `${graveyardSteps.length} items that could not be categorized — review and reassign`,
-      parentMapId: rootMapId, parentNodeId: graveyardId,
-      nodes: graveyardNodes, edges: [],
-    };
-
-    rawOverviewNodes.push({
-      id: graveyardId, type: 'journeyNode', position: { x: 0, y: 0 },
-      data: {
-        label: 'Unclassified Items',
-        description: `${graveyardSteps.length} items to review`,
-        nodeType: 'subprocess', color: '#94a3b8', subMapId: graveyardMapId,
-      },
-    });
+    maps[graveyardMapId] = { id: graveyardMapId, name: 'Unclassified Items', description: `${graveyardSteps.length} items to review`, parentMapId: rootMapId, parentNodeId: graveyardId, nodes: graveyardNodes, edges: [] };
+    rawOverviewNodes.push(buildOverviewNode(graveyardId, 'Unclassified Items', `${graveyardSteps.length} items to review`, '#94a3b8', graveyardMapId));
   }
 
   const columns = Math.min(Math.ceil(Math.sqrt(rawOverviewNodes.length)), 4);
   const overviewNodes = rawOverviewNodes.map((node, i) => ({
-    ...node,
-    position: {
-      x: (i % columns) * 280,
-      y: Math.floor(i / columns) * 160,
-    },
+    ...node, position: { x: (i % columns) * 280, y: Math.floor(i / columns) * 160 },
   }));
 
-  maps[rootMapId] = {
-    id: rootMapId,
-    name: 'Overview',
-    description: 'Top-level categories',
-    parentMapId: null,
-    parentNodeId: null,
-    nodes: overviewNodes,
-    edges: [],
-  };
+  maps[rootMapId] = { id: rootMapId, name: 'Overview', description: 'Top-level categories', parentMapId: null, parentNodeId: null, nodes: overviewNodes, edges: [] };
 
   return {
-    id: projectId,
-    name: projectName,
+    id: projectId, name: projectName,
     description: isDraft ? 'Draft — review and finalize' : 'Imported from text',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    rootMapId,
-    maps,
-    isDraft,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    rootMapId, maps, isDraft,
   };
 }
 
