@@ -62,3 +62,9 @@ This is a **React + TypeScript + Vite** SPA — a visual user journey / process 
 - Password disabled for testing — flip `DEV_SKIP_AUTH` in `src/store/useAuthStore.ts`
 - Claude API key stored in localStorage (key: `processmap-claude-api-key`)
 - The `--no-verify` flag is needed for git commits (pre-commit hook has a bug with project names containing spaces)
+
+### Testing preference (token-efficient default)
+
+- Prefer terminal-driven validation (`npm run build`, `npm run lint`) as the default evidence path.
+- Do **not** run screen recording or computer-use manual walkthroughs unless the user explicitly asks for them.
+- If manual testing is needed, keep it concise and avoid video artifacts by default.
