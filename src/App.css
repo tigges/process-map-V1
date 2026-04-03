@@ -2200,6 +2200,25 @@ body,
   margin-bottom: 8px;
 }
 
+.import-map-overview__filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.import-map-overview__filters > span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.import-map-overview__summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
 .import-map-overview__pages {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2260,6 +2279,10 @@ body,
   border-left-color: #a1a1aa;
 }
 
+.import-map-block--needs-review {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35) inset;
+}
+
 .import-map-block__top {
   display: flex;
   align-items: center;
@@ -2314,6 +2337,16 @@ body,
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.import-map-overview__empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 14px;
+  text-align: center;
 }
 
 .import-map-preview-card {

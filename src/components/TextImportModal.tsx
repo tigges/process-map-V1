@@ -41,11 +41,18 @@ which uses Claude to intelligently structure your content.`;
 type WizardStep = 'paste' | 'confirm-ai' | 'review' | 'categories' | 'allocate';
 type GroupingMode = 'per_file' | 'shared_categories';
 type DedupePolicy = 'within_file' | 'cross_file_safe';
+type OverviewFilter = 'all' | 'needs_review' | 'unclassified' | 'fact';
 
 interface ParsedSourceFile {
   id: string;
   name: string;
   steps: ParsedStep[];
+}
+
+interface ParseSingleFileResult {
+  name: string;
+  text: string;
+  pages?: string[];
 }
 
 type UploadedSourceType = 'none' | 'pdf' | 'docx' | 'text';
@@ -75,7 +82,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [importInterpretation, setImportInterpretation] = useState<ImportInterpretation | null>(null);
   const [showInterpretation, setShowInterpretation] = useState(false);
   const [deepPromptCopied, setDeepPromptCopied] = useState(false);
-  const [exportStatus] = useState<string | null>(null);
+  const [overviewFilter, setOverviewFilter] = useState<OverviewFilter>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const aiAvailable = hasApiKey();
@@ -107,6 +114,22 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     }
     return flat;
   }, [displayedSteps]);
+
+  const filteredInterpretationPages = useMemo(() => {
+    if (!importInterpretation) return [];
+    if (overviewFilter === 'all') return importInterpretation.pages;
+    return importInterpretation.pages
+      .map((page) => ({
+        ...page,
+        blocks: page.blocks.filter((block) => {
+          if (overviewFilter === 'needs_review') {
+            return block.cluster === 'unclassified' || block.confidence < 0.75;
+          }
+          return block.cluster === overviewFilter;
+        }),
+      }))
+      .filter((page) => page.blocks.length > 0);
+  }, [importInterpretation, overviewFilter]);
 
   const handleBasicParse = useCallback(() => {
     if (!text.trim()) return;
@@ -217,9 +240,10 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     fileInputRef.current?.click();
   }, []);
 
-  const parseSingleFile = useCallback(async (file: File): Promise<{ name: string; text: string }> => {
+  const parseSingleFile = useCallback(async (file: File): Promise<ParseSingleFileResult> => {
     const name = file.name.toLowerCase();
     let fileText = '';
+    let pageTexts: string[] | undefined;
     if (name.endsWith('.pdf')) {
       const pdfjsLib = await import('pdfjs-dist');
       pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString();
@@ -242,13 +266,14 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         pages.push(lines.join(''));
       }
       fileText = pages.join('\n\n');
+      pageTexts = pages.map((p) => p.trim()).filter((p) => p.length > 0);
     } else if (name.endsWith('.docx')) {
       const { extractDocxText } = await import('../utils/exportImport');
       fileText = await extractDocxText(file);
     } else {
       fileText = await file.text();
     }
-    return { name: file.name, text: fileText };
+    return { name: file.name, text: fileText, pages: pageTexts };
   }, []);
 
   const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
@@ -265,7 +290,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         setParsedFiles([]);
         setActiveFileId(null);
         if (lowerName.endsWith('.pdf')) {
-          const pages = parsed.text.split('\n\n').filter((p) => p.trim().length > 0);
+          const pages = parsed.pages ?? [];
           setSourceType('pdf');
           setSourceFileName(files[0].name);
           setSourcePageTexts(pages);
@@ -277,6 +302,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
           setImportInterpretation(null);
         }
         setShowInterpretation(false);
+        setOverviewFilter('all');
         setDeepPromptCopied(false);
         if (!projectName) setProjectName(parsed.name.replace(/\.\w+$/, ''));
       } else {
@@ -302,6 +328,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         setSourcePageTexts([]);
         setImportInterpretation(null);
         setShowInterpretation(false);
+        setOverviewFilter('all');
         setDeepPromptCopied(false);
         if (!projectName) setProjectName('Multi-file import');
       }
@@ -322,6 +349,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       setSourcePageTexts([]);
       setImportInterpretation(null);
       setShowInterpretation(false);
+      setOverviewFilter('all');
       setDeepPromptCopied(false);
     }
   }, [sourceType]);
@@ -545,7 +573,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                     <button className="btn btn--ghost btn--sm" onClick={handleExportContentMap}>
                       Export content map (.html)
                     </button>
-                    {exportStatus && <span className="import-map-overview__status">{exportStatus}</span>}
                     <button
                       className="btn btn--ghost btn--sm"
                       onClick={handleCopyDeepVisualPrompt}
@@ -554,10 +581,44 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                       {deepPromptCopied ? 'Deep visual prompt copied!' : 'Copy Claude deep visual prompt'}
                     </button>
                   </div>
+                  <div className="import-map-overview__filters">
+                    <span>Filter:</span>
+                    <button
+                      className={`toolbar__toggle ${overviewFilter === 'all' ? 'toolbar__toggle--active' : ''}`}
+                      onClick={() => setOverviewFilter('all')}
+                    >
+                      All
+                    </button>
+                    <button
+                      className={`toolbar__toggle ${overviewFilter === 'needs_review' ? 'toolbar__toggle--active' : ''}`}
+                      onClick={() => setOverviewFilter('needs_review')}
+                    >
+                      Needs review ({importInterpretation.reviewCount})
+                    </button>
+                    <button
+                      className={`toolbar__toggle ${overviewFilter === 'unclassified' ? 'toolbar__toggle--active' : ''}`}
+                      onClick={() => setOverviewFilter('unclassified')}
+                    >
+                      Unclassified ({importInterpretation.reviewCountByCluster.unclassified})
+                    </button>
+                    <button
+                      className={`toolbar__toggle ${overviewFilter === 'fact' ? 'toolbar__toggle--active' : ''}`}
+                      onClick={() => setOverviewFilter('fact')}
+                    >
+                      Facts ({importInterpretation.countsByCluster.fact})
+                    </button>
+                  </div>
+                  <div className="import-map-overview__summary">
+                    {importInterpretation.reviewCount}/{importInterpretation.totalBlocks} blocks need review
+                    {overviewFilter !== 'all' ? ` · showing ${overviewFilter.replace('_', ' ')}` : ''}
+                  </div>
                   {showInterpretation && (
                     <>
+                      {filteredInterpretationPages.length === 0 && (
+                        <div className="import-map-overview__empty">No blocks match this filter.</div>
+                      )}
                       <div className="import-map-overview__pages">
-                        {importInterpretation.pages.map((page) => (
+                        {filteredInterpretationPages.map((page) => (
                           <div key={page.page} className="import-map-page">
                             <div className="import-map-page__title">
                               Page {page.page} · {CLUSTER_LABELS[page.dominantCluster]}
@@ -566,7 +627,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                               {page.blocks.map((block) => (
                                 <article
                                   key={block.id}
-                                  className={`import-map-block import-map-block--${block.cluster}`}
+                                  className={`import-map-block import-map-block--${block.cluster}${block.cluster === 'unclassified' || block.confidence < 0.75 ? ' import-map-block--needs-review' : ''}`}
                                 >
                                   <div className="import-map-block__top">
                                     <span className="import-map-block__badge">{CLUSTER_LABELS[block.cluster]}</span>
