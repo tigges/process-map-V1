@@ -66,7 +66,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [parsedSteps, setParsedSteps] = useState<ParsedStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [useAi, setUseAi] = useState(false);
+  const [useAi, setUseAi] = useState(true);
   const [wasAiParsed, setWasAiParsed] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -170,13 +170,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       handleBasicParse();
     }
   }, [useAi, aiAvailable, handleRequestAiParse, handleBasicParse]);
-
-  const handleImportAsDraft = useCallback(() => {
-    if (parsedSteps.length === 0) return;
-    const project = stepsToProject(parsedSteps, projectName || 'Imported Journey', true, wasAiParsed);
-    importProject(JSON.stringify(project));
-    onClose();
-  }, [parsedSteps, projectName, importProject, onClose, wasAiParsed]);
 
   const handleImportFinal = useCallback(() => {
     if (parsedSteps.length === 0) return;
@@ -780,11 +773,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
               <button className="btn btn--primary" onClick={handleCustomImport} disabled={parsedSteps.length === 0}>
                 Continue to Customize Categories →
               </button>
-              <button className="btn btn--secondary" onClick={handleImportAsDraft} disabled={parsedSteps.length === 0}>
-                Quick Import as Draft
-              </button>
               <button className="btn btn--secondary" onClick={handleImportFinal} disabled={parsedSteps.length === 0}>
-                Quick Import & Finalize
+                Quick Import
               </button>
             </>
           )}
