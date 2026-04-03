@@ -1607,6 +1607,53 @@ body,
   border-radius: 12px;
 }
 
+.import-hierarchy {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #f8fafc;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.import-hierarchy__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.import-hierarchy__hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.import-hierarchy__preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.import-hierarchy__card {
+  border: 1px solid #dbe2ea;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px;
+}
+
+.import-hierarchy__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.import-hierarchy__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 .tree-review__hint {
   font-size: 12px;
   color: var(--text-muted);
@@ -2396,6 +2443,10 @@ body,
   }
 
   .import-map-overview__pages {
+    grid-template-columns: 1fr;
+  }
+
+  .import-hierarchy__preview {
     grid-template-columns: 1fr;
   }
 }

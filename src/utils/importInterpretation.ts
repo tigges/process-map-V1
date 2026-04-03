@@ -236,16 +236,13 @@ export function buildImportInterpretation(sourceName: string, pageTexts: string[
     };
 
     if (steps.length > 0) {
+      const visitStep = (step: ParsedStep, depth: number) => {
+        const classified = classifyStep(step, depth === 0);
+        pushBlock(step.label, `${step.label}: ${step.description}`.trim(), classified);
+        for (const child of step.children) visitStep(child, depth + 1);
+      };
       for (const step of steps) {
-        const parentClassified = classifyStep(step, true);
-        pushBlock(step.label, `${step.label}: ${step.description}`.trim(), parentClassified);
-
-        if (step.children.length > 0) {
-          for (const child of step.children) {
-            const classified = classifyStep(child);
-            pushBlock(child.label, `${child.label}: ${child.description}`.trim(), classified);
-          }
-        }
+        visitStep(step, 0);
       }
     } else {
       const lines = pageText.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 10);

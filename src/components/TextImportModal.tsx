@@ -8,6 +8,7 @@ import {
   FACTS_CATEGORY_DESCRIPTION,
   ensureFactsCategory,
   countFactCandidates,
+  summarizeHierarchy,
   type ParsedStep,
 } from '../utils/textParser';
 import { hasApiKey, smartParse, estimateCost, getManualPrompt } from '../utils/claudeApi';
@@ -42,6 +43,30 @@ type WizardStep = 'paste' | 'confirm-ai' | 'review' | 'categories' | 'allocate';
 type GroupingMode = 'per_file' | 'shared_categories';
 type DedupePolicy = 'within_file' | 'cross_file_safe';
 type OverviewFilter = 'all' | 'needs_review' | 'unclassified' | 'fact';
+
+function flattenLeafSteps(steps: ParsedStep[]): ParsedStep[] {
+  const out: ParsedStep[] = [];
+  const visit = (nodes: ParsedStep[]) => {
+    for (const node of nodes) {
+      if (node.children.length > 0) {
+        visit(node.children);
+      } else {
+        out.push(node);
+      }
+    }
+  };
+  visit(steps);
+  return out;
+}
+
+function attachSourceMeta(steps: ParsedStep[], sourceName: string): ParsedStep[] {
+  return steps.map((step) => ({
+    ...step,
+    sourceId: sourceName,
+    sourceName,
+    children: attachSourceMeta(step.children, sourceName),
+  }));
+}
 
 interface ParsedSourceFile {
   id: string;
@@ -103,17 +128,9 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     return base;
   }, [displayedSteps, factCount, alwaysIncludeFacts]);
 
-  const flatSteps = useMemo(() => {
-    const flat: ParsedStep[] = [];
-    for (const step of displayedSteps) {
-      if (step.children.length > 0) {
-        flat.push(...step.children);
-      } else {
-        flat.push(step);
-      }
-    }
-    return flat;
-  }, [displayedSteps]);
+  const flatSteps = useMemo(() => flattenLeafSteps(displayedSteps), [displayedSteps]);
+
+  const hierarchySummary = useMemo(() => summarizeHierarchy(displayedSteps), [displayedSteps]);
 
   const filteredInterpretationPages = useMemo(() => {
     if (!importInterpretation) return [];
@@ -303,12 +320,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         const mergedTextParts: string[] = [];
         for (const file of files) {
           const parsed = await parseSingleFile(file);
-          const steps = parseTextToSteps(parsed.text).map((s) => ({
-            ...s,
-            sourceId: file.name,
-            sourceName: file.name,
-            children: s.children.map((c) => ({ ...c, sourceId: file.name, sourceName: file.name })),
-          }));
+          const steps = attachSourceMeta(parseTextToSteps(parsed.text), file.name);
           results.push({ id: file.name, name: file.name, steps });
           mergedTextParts.push(`## ${file.name}\n${parsed.text}`);
         }
@@ -541,6 +553,34 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                 Recommended: continue to customize categories and allocate steps before importing.
                 {factCount > 0 ? ` Detected ${factCount} fact/context statements. They will be pre-allocated to '${FACTS_CATEGORY_NAME}' in Step 4.` : ''}
               </p>
+              <div className="import-hierarchy">
+                <div className="import-hierarchy__stats">
+                  <span className="tree-review__stat">{hierarchySummary.categories} categories</span>
+                  <span className="tree-review__stat">{hierarchySummary.sections} sections</span>
+                  <span className="tree-review__stat">{hierarchySummary.processSteps} process steps</span>
+                  <span className="tree-review__stat">{hierarchySummary.estimatedMaps} map(s)</span>
+                </div>
+                <p className="import-hierarchy__hint">
+                  Planned hierarchy: Overview → Category → Section → Flow steps.
+                </p>
+                {hierarchySummary.preview.length > 0 && (
+                  <div className="import-hierarchy__preview">
+                    {hierarchySummary.preview.map((item) => (
+                      <div key={item.category} className="import-hierarchy__card">
+                        <div className="import-hierarchy__title">{item.category}</div>
+                        <div className="import-hierarchy__meta">
+                          Sections: {item.sections.length > 0 ? item.sections.join(', ') : 'None'}
+                        </div>
+                        {item.directSteps > 0 && (
+                          <div className="import-hierarchy__meta">
+                            Direct process steps: {item.directSteps}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {importInterpretation && (
                 <div className="import-map-overview">
                   <div className="import-map-overview__head">
