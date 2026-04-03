@@ -11,6 +11,14 @@ import {
   type ParsedStep,
 } from '../utils/textParser';
 import { hasApiKey, smartParse, estimateCost, getManualPrompt } from '../utils/claudeApi';
+import {
+  buildImportInterpretation,
+  buildContentMapHtml,
+  buildDeepVisualPrompt,
+  CLUSTER_LABELS,
+  type ImportInterpretation,
+  type ImportCluster,
+} from '../utils/importInterpretation';
 import ParsedTreeReview from './ParsedTreeReview';
 import CategoryBuilder, { type Category } from './CategoryBuilder';
 import StepAllocator from './StepAllocator';
@@ -40,6 +48,8 @@ interface ParsedSourceFile {
   steps: ParsedStep[];
 }
 
+type UploadedSourceType = 'none' | 'pdf' | 'docx' | 'text';
+
 export default function TextImportModal({ onClose }: TextImportModalProps) {
   const importProject = useAppStore((s) => s.importProject);
 
@@ -59,6 +69,13 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [dedupePolicy, setDedupePolicy] = useState<DedupePolicy>('within_file');
   const [parsedFiles, setParsedFiles] = useState<ParsedSourceFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const [sourceType, setSourceType] = useState<UploadedSourceType>('none');
+  const [sourceFileName, setSourceFileName] = useState('');
+  const [sourcePageTexts, setSourcePageTexts] = useState<string[]>([]);
+  const [importInterpretation, setImportInterpretation] = useState<ImportInterpretation | null>(null);
+  const [showInterpretation, setShowInterpretation] = useState(false);
+  const [deepPromptCopied, setDeepPromptCopied] = useState(false);
+  const [exportStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const aiAvailable = hasApiKey();
@@ -243,9 +260,24 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     try {
       if (files.length === 1) {
         const parsed = await parseSingleFile(files[0]);
+        const lowerName = files[0].name.toLowerCase();
         setText(parsed.text);
         setParsedFiles([]);
         setActiveFileId(null);
+        if (lowerName.endsWith('.pdf')) {
+          const pages = parsed.text.split('\n\n').filter((p) => p.trim().length > 0);
+          setSourceType('pdf');
+          setSourceFileName(files[0].name);
+          setSourcePageTexts(pages);
+          setImportInterpretation(buildImportInterpretation(files[0].name, pages));
+        } else {
+          setSourceType(lowerName.endsWith('.docx') ? 'docx' : 'text');
+          setSourceFileName(files[0].name);
+          setSourcePageTexts([]);
+          setImportInterpretation(null);
+        }
+        setShowInterpretation(false);
+        setDeepPromptCopied(false);
         if (!projectName) setProjectName(parsed.name.replace(/\.\w+$/, ''));
       } else {
         const results: ParsedSourceFile[] = [];
@@ -265,6 +297,12 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         setActiveFileId(results[0]?.id ?? null);
         setParsedSteps(results.flatMap((r) => r.steps));
         setText(mergedTextParts.join('\n\n'));
+        setSourceType('none');
+        setSourceFileName('Multiple files');
+        setSourcePageTexts([]);
+        setImportInterpretation(null);
+        setShowInterpretation(false);
+        setDeepPromptCopied(false);
         if (!projectName) setProjectName('Multi-file import');
       }
     } catch (err) {
@@ -275,12 +313,56 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     }
   }, [parseSingleFile, projectName]);
 
+  const handleSourceTextChange = useCallback((value: string) => {
+    setText(value);
+    setError('');
+    if (sourceType !== 'none') {
+      setSourceType('none');
+      setSourceFileName('');
+      setSourcePageTexts([]);
+      setImportInterpretation(null);
+      setShowInterpretation(false);
+      setDeepPromptCopied(false);
+    }
+  }, [sourceType]);
+
+  const notify = useCallback((message: string) => {
+    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+      window.alert(message);
+    }
+  }, []);
+
   const handleCopyPrompt = useCallback(() => {
     navigator.clipboard.writeText(getManualPrompt()).then(() => {
       setPromptCopied(true);
       setTimeout(() => setPromptCopied(false), 2000);
     });
   }, []);
+
+  const handleExportContentMap = useCallback(() => {
+    if (!importInterpretation) return;
+    const html = buildContentMapHtml(importInterpretation);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const baseName = (sourceFileName || importInterpretation.sourceName || 'import-content-map').replace(/\.[^/.]+$/, '');
+    link.href = url;
+    link.download = `${baseName}-content-map.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    notify(`Downloaded ${baseName}-content-map.html`);
+  }, [importInterpretation, sourceFileName, notify]);
+
+  const handleCopyDeepVisualPrompt = useCallback(() => {
+    if (!sourceFileName || sourceType !== 'pdf') return;
+    navigator.clipboard.writeText(buildDeepVisualPrompt(sourceFileName, sourcePageTexts.length)).then(() => {
+      setDeepPromptCopied(true);
+      setTimeout(() => setDeepPromptCopied(false), 2000);
+      notify('Copied deep visual prompt to clipboard.');
+    });
+  }, [sourceFileName, sourceType, sourcePageTexts.length, notify]);
 
   const activeStepNum =
     wizardStep === 'paste' || wizardStep === 'confirm-ai'
@@ -356,7 +438,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                   className="modal__textarea"
                   placeholder={PLACEHOLDER}
                   value={text}
-                  onChange={(e) => { setText(e.target.value); setError(''); }}
+                  onChange={(e) => handleSourceTextChange(e.target.value)}
                   rows={14}
                 />
                 <input
@@ -438,6 +520,101 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                 Recommended: continue to customize categories and allocate steps before importing.
                 {factCount > 0 ? ` Detected ${factCount} fact/context statements. They will be pre-allocated to '${FACTS_CATEGORY_NAME}' in Step 4.` : ''}
               </p>
+              {importInterpretation && (
+                <div className="import-map-overview">
+                  <div className="import-map-overview__head">
+                    <div>
+                      <h4>Import interpretation overview</h4>
+                      <p>{importInterpretation.sourceName} · {importInterpretation.pages.length} pages</p>
+                    </div>
+                    <div className="import-map-overview__counts">
+                      {(Object.keys(importInterpretation.countsByCluster) as ImportCluster[]).map((cluster) => (
+                        <span
+                          key={cluster}
+                          className={`import-map-overview__chip import-map-overview__chip--${cluster}`}
+                        >
+                          {CLUSTER_LABELS[cluster]} {importInterpretation.countsByCluster[cluster]}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="import-map-overview__actions">
+                    <button className="btn btn--ghost btn--sm" onClick={() => setShowInterpretation((v) => !v)}>
+                      {showInterpretation ? 'Hide page overview' : 'Show page overview'}
+                    </button>
+                    <button className="btn btn--ghost btn--sm" onClick={handleExportContentMap}>
+                      Export content map (.html)
+                    </button>
+                    {exportStatus && <span className="import-map-overview__status">{exportStatus}</span>}
+                    <button
+                      className="btn btn--ghost btn--sm"
+                      onClick={handleCopyDeepVisualPrompt}
+                      disabled={sourceType !== 'pdf'}
+                    >
+                      {deepPromptCopied ? 'Deep visual prompt copied!' : 'Copy Claude deep visual prompt'}
+                    </button>
+                  </div>
+                  {showInterpretation && (
+                    <>
+                      <div className="import-map-overview__pages">
+                        {importInterpretation.pages.map((page) => (
+                          <div key={page.page} className="import-map-page">
+                            <div className="import-map-page__title">
+                              Page {page.page} · {CLUSTER_LABELS[page.dominantCluster]}
+                            </div>
+                            <div className="import-map-page__blocks">
+                              {page.blocks.map((block) => (
+                                <article
+                                  key={block.id}
+                                  className={`import-map-block import-map-block--${block.cluster}`}
+                                >
+                                  <div className="import-map-block__top">
+                                    <span className="import-map-block__badge">{CLUSTER_LABELS[block.cluster]}</span>
+                                    <span className="import-map-block__confidence">{block.confidence.toFixed(2)}</span>
+                                  </div>
+                                  <div className="import-map-block__label">{block.label}</div>
+                                  <div className="import-map-block__excerpt">{block.excerpt}</div>
+                                  <div className="import-map-block__signals">
+                                    {block.signals.map((signal) => (
+                                      <span key={`${block.id}-${signal}`}>{signal}</span>
+                                    ))}
+                                  </div>
+                                </article>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="import-map-overview__preview">
+                        <div className="import-map-preview-card">
+                          <div className="import-map-preview-card__title">Likely overview/category nodes</div>
+                          <ul>
+                            {importInterpretation.overviewLabels.length > 0
+                              ? importInterpretation.overviewLabels.map((label) => <li key={label}>{label}</li>)
+                              : <li>None detected</li>}
+                          </ul>
+                        </div>
+                        <div className="import-map-preview-card">
+                          <div className="import-map-preview-card__title">Likely facts board items</div>
+                          <ul>
+                            {importInterpretation.factsBoardLabels.length > 0
+                              ? importInterpretation.factsBoardLabels.map((label) => <li key={label}>{label}</li>)
+                              : <li>None detected</li>}
+                          </ul>
+                        </div>
+                        <div className="import-map-preview-card">
+                          <div className="import-map-preview-card__title">Likely unclassified items</div>
+                          <ul>
+                            {importInterpretation.unclassifiedLabels.length > 0
+                              ? importInterpretation.unclassifiedLabels.map((label) => <li key={label}>{label}</li>)
+                              : <li>None detected</li>}
+                          </ul>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               {parsedFiles.length > 0 && (
                 <div className="allocator__stats" style={{ marginBottom: 8 }}>
                   {parsedFiles.map((f) => (
