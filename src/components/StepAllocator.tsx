@@ -15,10 +15,47 @@ interface ReviewItem {
   targetCategoryId: string;
   confidence: number;
   reason: string;
+  level: 'parent' | 'leaf';
 }
 
 const HIGH_CONFIDENCE = 0.8;
 const REVIEW_CONFIDENCE = 0.5;
+const PARENT_HIGH_CONFIDENCE = 0.75;
+const PARENT_REVIEW_CONFIDENCE = 0.5;
+
+interface StepAllocationPartition {
+  parents: ParsedStep[];
+  leaves: ParsedStep[];
+  parentByChildId: Map<string, string>;
+}
+
+function partitionStepsForAllocation(steps: ParsedStep[]): StepAllocationPartition {
+  const parents: ParsedStep[] = [];
+  const leaves: ParsedStep[] = [];
+  const parentByChildId = new Map<string, string>();
+
+  const visit = (nodes: ParsedStep[], parentId?: string) => {
+    for (const node of nodes) {
+      if (parentId) {
+        parentByChildId.set(node.id, parentId);
+      }
+
+      const isParent = node.children.length > 0 || node.nodeType === 'subprocess';
+      if (isParent) {
+        parents.push(node);
+      }
+
+      if (node.children.length > 0) {
+        visit(node.children, node.id);
+      } else if (node.nodeType !== 'subprocess') {
+        leaves.push(node);
+      }
+    }
+  };
+
+  visit(steps);
+  return { parents, leaves, parentByChildId };
+}
 
 export default function StepAllocator({ categories: initialCats, steps, onConfirm, onBack }: StepAllocatorProps) {
   const [cats, setCats] = useState<Category[]>(initialCats.map((c) => ({ ...c, steps: [...c.steps] })));
@@ -28,12 +65,25 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
   const [dragStep, setDragStep] = useState<ParsedStep | null>(null);
   const [dragOverCat, setDragOverCat] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
+  const [parentReviewQueue, setParentReviewQueue] = useState<ReviewItem[]>([]);
+  const [leafReviewQueue, setLeafReviewQueue] = useState<ReviewItem[]>([]);
   const [autoAccepted, setAutoAccepted] = useState<ParsedStep[]>([]);
+
+  const split = useMemo(() => partitionStepsForAllocation(steps), [steps]);
+  const allocatableSteps = useMemo(() => {
+    const byId = new Map<string, ParsedStep>();
+    for (const step of split.parents) {
+      byId.set(step.id, step);
+    }
+    for (const step of split.leaves) {
+      byId.set(step.id, step);
+    }
+    return Array.from(byId.values());
+  }, [split.leaves, split.parents]);
 
   const [unallocated, setUnallocated] = useState<ParsedStep[]>(() => {
     const allocatedIds = new Set(initialCats.flatMap((c) => c.steps.map((s) => s.id)));
-    return steps.filter((s) => !allocatedIds.has(s.id));
+    return allocatableSteps.filter((s) => !allocatedIds.has(s.id));
   });
 
   const allCategoryIds = useMemo(() => new Set(cats.map((c) => c.id)), [cats]);
@@ -42,7 +92,8 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
     setCats((prev) => prev.map((c) => ({ ...c, steps: c.steps.filter((s) => s.id !== stepId) })));
     setUnallocated((prev) => prev.filter((s) => s.id !== stepId));
     setGraveyard((prev) => prev.filter((s) => s.id !== stepId));
-    setReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
+    setParentReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
+    setLeafReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
     setAutoAccepted((prev) => prev.filter((s) => s.id !== stepId));
   }, []);
 
@@ -78,116 +129,199 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
     setDragStep(null);
   }, [dragStep, removeStepFromAllBuckets]);
 
+  const getTargetCategory = useCallback((itemCategory: string) => {
+    const byCategoryName = new Map(cats.map((c) => [c.name.toLowerCase(), c]));
+    const direct = byCategoryName.get(itemCategory.toLowerCase());
+    const fallback = cats.find((c) => (
+      c.name.toLowerCase().includes(itemCategory.toLowerCase()) ||
+      itemCategory.toLowerCase().includes(c.name.toLowerCase())
+    ));
+    return direct ?? fallback;
+  }, [cats]);
+
+  const resolveReviewQueueItem = useCallback((stepId: string) => {
+    const parentItem = parentReviewQueue.find((r) => r.step.id === stepId);
+    if (parentItem) return parentItem;
+    return leafReviewQueue.find((r) => r.step.id === stepId) ?? null;
+  }, [parentReviewQueue, leafReviewQueue]);
+
   const handleAutoAllocate = useCallback(async () => {
     if (!hasApiKey() || unallocated.length === 0) return;
     setAiLoading(true);
     try {
-      const allocation = await smartAllocateSteps(
-        cats.map((c) => c.name),
-        unallocated.map((s) => ({ id: s.id, label: s.label, description: s.description })),
-      );
-      const byStepId = new Map(unallocated.map((s) => [s.id, s]));
-      const byCategoryName = new Map(cats.map((c) => [c.name.toLowerCase(), c]));
-
-      const nextReview: ReviewItem[] = [];
+      const unresolved = [...unallocated];
       const accepted: ParsedStep[] = [];
-      const unresolved: ParsedStep[] = [];
+      const nextParentReview: ReviewItem[] = [];
+      const nextLeafReview: ReviewItem[] = [];
+      const parentAssignedCategory = new Map<string, string>();
 
-      for (const item of allocation) {
-        const step = byStepId.get(item.id);
-        if (!step) continue;
-
-        const direct = byCategoryName.get(item.category.toLowerCase());
-        const fallback = cats.find((c) => c.name.toLowerCase().includes(item.category.toLowerCase()) || item.category.toLowerCase().includes(c.name.toLowerCase()));
-        const target = direct ?? fallback;
-
-        if (!target) {
-          unresolved.push(step);
-          continue;
+      // Pass A: parent/subprocess containers.
+      const parentPool = split.parents.filter((p) => unresolved.some((u) => u.id === p.id));
+      if (parentPool.length > 0) {
+        const parentAlloc = await smartAllocateSteps(
+          cats.map((c) => c.name),
+          parentPool.map((s) => ({ id: s.id, label: s.label, description: s.description })),
+        );
+        for (const item of parentAlloc) {
+          const step = parentPool.find((p) => p.id === item.id);
+          if (!step) continue;
+          const target = getTargetCategory(item.category);
+          if (!target) continue;
+          if (item.confidence >= PARENT_HIGH_CONFIDENCE) {
+            placeStepInCategory(step, target.id);
+            accepted.push(step);
+            parentAssignedCategory.set(step.id, target.id);
+            continue;
+          }
+          if (item.confidence >= PARENT_REVIEW_CONFIDENCE) {
+            nextParentReview.push({
+              step,
+              targetCategoryId: target.id,
+              confidence: item.confidence,
+              reason: item.reason || 'Parent allocation needs review',
+              level: 'parent',
+            });
+            parentAssignedCategory.set(step.id, target.id);
+          }
         }
+      }
 
-        if (item.confidence >= HIGH_CONFIDENCE) {
-          placeStepInCategory(step, target.id);
-          accepted.push(step);
-          continue;
+      // Pass B: leaf steps.
+      const leafPool = split.leaves.filter((s) => unresolved.some((u) => u.id === s.id));
+      if (leafPool.length > 0) {
+        const leafAlloc = await smartAllocateSteps(
+          cats.map((c) => c.name),
+          leafPool.map((s) => ({ id: s.id, label: s.label, description: s.description })),
+        );
+        for (const item of leafAlloc) {
+          const step = leafPool.find((p) => p.id === item.id);
+          if (!step) continue;
+          const target = getTargetCategory(item.category);
+          const inheritedCategory = step.indent > 0
+            ? (split.parents.find((p) => p.children.some((c) => c.id === step.id))?.id ?? null)
+            : null;
+          const inheritedTargetId = inheritedCategory ? parentAssignedCategory.get(inheritedCategory) : undefined;
+
+          if (target && item.confidence >= HIGH_CONFIDENCE) {
+            placeStepInCategory(step, target.id);
+            accepted.push(step);
+            continue;
+          }
+          if (target && item.confidence >= REVIEW_CONFIDENCE) {
+            nextLeafReview.push({
+              step,
+              targetCategoryId: target.id,
+              confidence: item.confidence,
+              reason: item.reason || 'Low confidence allocation',
+              level: 'leaf',
+            });
+            continue;
+          }
+          if (inheritedTargetId) {
+            placeStepInCategory(step, inheritedTargetId);
+            accepted.push(step);
+            continue;
+          }
         }
-
-        if (item.confidence >= REVIEW_CONFIDENCE) {
-          nextReview.push({
-            step,
-            targetCategoryId: target.id,
-            confidence: item.confidence,
-            reason: item.reason || 'Low confidence allocation',
-          });
-          continue;
-        }
-
-        unresolved.push(step);
       }
 
       const assignedIds = new Set([
         ...accepted.map((s) => s.id),
-        ...nextReview.map((r) => r.step.id),
-        ...unresolved.map((s) => s.id),
+        ...nextParentReview.map((r) => r.step.id),
+        ...nextLeafReview.map((r) => r.step.id),
       ]);
-
-      const leftovers = unallocated.filter((s) => !assignedIds.has(s.id));
-      const combinedUnallocated = [...unresolved, ...leftovers];
+      const combinedUnallocated = unresolved.filter((s) => !assignedIds.has(s.id));
 
       setAutoAccepted(accepted);
-      setReviewQueue(nextReview);
+      setParentReviewQueue(nextParentReview);
+      setLeafReviewQueue(nextLeafReview);
       setUnallocated(combinedUnallocated);
     } catch (err) {
       console.error('Auto-allocate failed:', err);
     } finally {
       setAiLoading(false);
     }
-  }, [cats, placeStepInCategory, unallocated]);
+  }, [cats, getTargetCategory, placeStepInCategory, split.leaves, split.parents, unallocated]);
 
   const resolveReviewItem = useCallback((stepId: string, targetCategoryId: string) => {
-    const item = reviewQueue.find((r) => r.step.id === stepId);
+    const item = resolveReviewQueueItem(stepId);
     if (!item) return;
     if (!allCategoryIds.has(targetCategoryId)) return;
     placeStepInCategory(item.step, targetCategoryId);
-    setReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
-  }, [allCategoryIds, placeStepInCategory, reviewQueue]);
+    setParentReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
+    setLeafReviewQueue((prev) => prev.filter((r) => r.step.id !== stepId));
+  }, [allCategoryIds, placeStepInCategory, resolveReviewQueueItem]);
 
   const sendReviewToUnallocated = useCallback((stepId: string) => {
-    const item = reviewQueue.find((r) => r.step.id === stepId);
+    const item = resolveReviewQueueItem(stepId);
     if (!item) return;
     removeStepFromAllBuckets(stepId);
     setUnallocated((prev) => [...prev, item.step]);
-  }, [removeStepFromAllBuckets, reviewQueue]);
+  }, [removeStepFromAllBuckets, resolveReviewQueueItem]);
 
   const totalAllocated = cats.reduce((sum, c) => sum + c.steps.length, 0);
   const factAllocated = factsCategoryId
     ? (cats.find((c) => c.id === factsCategoryId)?.steps.length ?? 0)
     : 0;
+  const totalReview = parentReviewQueue.length + leafReviewQueue.length;
 
   return (
     <div className="allocator">
       <p className="modal__hint">
-        AI auto-allocates high-confidence steps. You only review uncertain items.
+        AI first allocates subprocess containers, then leaf steps. You review only uncertain items.
       </p>
       <div className="allocator__stats">
         <span className="tree-review__stat">{unallocated.length} unallocated</span>
-        <span className="tree-review__stat">{reviewQueue.length} needs review</span>
+        <span className="tree-review__stat">{parentReviewQueue.length} parent review</span>
+        <span className="tree-review__stat">{leafReviewQueue.length} step review</span>
         <span className="tree-review__stat">{autoAccepted.length} auto-accepted</span>
         <span className="tree-review__stat">{totalAllocated} allocated</span>
         <span className="tree-review__stat">{factAllocated} facts allocated</span>
         <span className="tree-review__stat">{graveyard.length} discarded</span>
         {hasApiKey() && (
           <button className="btn btn--secondary btn--sm" onClick={handleAutoAllocate} disabled={aiLoading || unallocated.length === 0}>
-            {aiLoading ? 'Allocating...' : 'AI Auto-allocate'}
+            {aiLoading ? 'Allocating...' : 'AI Auto-allocate (Subprocess + Steps)'}
           </button>
         )}
       </div>
 
-      {reviewQueue.length > 0 && (
+      {parentReviewQueue.length > 0 && (
         <div className="allocator__review-queue">
-          <h4 className="allocator__col-title">Needs Review ({reviewQueue.length})</h4>
+          <h4 className="allocator__col-title">Subprocesses Need Review ({parentReviewQueue.length})</h4>
           <div className="allocator__review-list">
-            {reviewQueue.map((item) => (
+            {parentReviewQueue.map((item) => (
+              <div key={item.step.id} className="allocator__review-item">
+                <div className="allocator__review-main">
+                  <span className="allocator__step-label">{item.step.label}</span>
+                  <span className="allocator__review-reason">{item.reason}</span>
+                </div>
+                <div className="allocator__review-actions">
+                  <span className="allocator__review-confidence">{Math.round(item.confidence * 100)}%</span>
+                  <select
+                    className="allocator__review-select"
+                    value={item.targetCategoryId}
+                    onChange={(e) => resolveReviewItem(item.step.id, e.target.value)}
+                  >
+                    <option value="">Move to...</option>
+                    {cats.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button className="btn btn--ghost btn--sm" onClick={() => sendReviewToUnallocated(item.step.id)}>
+                    Keep Unallocated
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {leafReviewQueue.length > 0 && (
+        <div className="allocator__review-queue">
+          <h4 className="allocator__col-title">Steps Need Review ({leafReviewQueue.length})</h4>
+          <div className="allocator__review-list">
+            {leafReviewQueue.map((item) => (
               <div key={item.step.id} className="allocator__review-item">
                 <div className="allocator__review-main">
                   <span className="allocator__step-label">{item.step.label}</span>
@@ -293,7 +427,7 @@ export default function StepAllocator({ categories: initialCats, steps, onConfir
       <div className="modal__footer" style={{ borderTop: 'none', padding: '12px 0 0' }}>
         <button className="btn btn--ghost" onClick={onBack}>← Back</button>
         <button className="btn btn--primary" onClick={() => onConfirm(cats, graveyard, unallocated)} disabled={totalAllocated === 0 && unallocated.length === 0 && graveyard.length === 0}>
-          Import ({totalAllocated} allocated, {reviewQueue.length} review, {unallocated.length} unallocated) →
+          Import ({totalAllocated} allocated, {totalReview} review, {unallocated.length} unallocated) →
         </button>
       </div>
     </div>

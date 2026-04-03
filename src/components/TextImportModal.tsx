@@ -122,18 +122,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     return base;
   }, [displayedSteps, factCount, alwaysIncludeFacts]);
 
-  const flatSteps = useMemo(() => {
-    const flat: ParsedStep[] = [];
-    for (const step of displayedSteps) {
-      if (step.children.length > 0) {
-        flat.push(...step.children);
-      } else {
-        flat.push(step);
-      }
-    }
-    return flat;
-  }, [displayedSteps]);
-
   const filteredInterpretationPages = useMemo(() => {
     if (!importInterpretation) return [];
     if (overviewFilter === 'all') return importInterpretation.pages;
@@ -920,7 +908,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
           {wizardStep === 'allocate' && (
             <StepAllocator
               categories={categories}
-              steps={flatSteps}
+              steps={displayedSteps}
               onConfirm={handleAllocateConfirm}
               onBack={() => setWizardStep('categories')}
             />
