@@ -8,18 +8,9 @@ import {
   FACTS_CATEGORY_DESCRIPTION,
   ensureFactsCategory,
   countFactCandidates,
-  summarizeHierarchy,
   type ParsedStep,
 } from '../utils/textParser';
 import { hasApiKey, smartParse, estimateCost, getManualPrompt } from '../utils/claudeApi';
-import {
-  buildImportInterpretation,
-  buildContentMapHtml,
-  buildDeepVisualPrompt,
-  CLUSTER_LABELS,
-  type ImportInterpretation,
-  type ImportCluster,
-} from '../utils/importInterpretation';
 import ParsedTreeReview from './ParsedTreeReview';
 import CategoryBuilder, { type Category } from './CategoryBuilder';
 import StepAllocator from './StepAllocator';
@@ -42,45 +33,12 @@ which uses Claude to intelligently structure your content.`;
 type WizardStep = 'paste' | 'confirm-ai' | 'review' | 'categories' | 'allocate';
 type GroupingMode = 'per_file' | 'shared_categories';
 type DedupePolicy = 'within_file' | 'cross_file_safe';
-type OverviewFilter = 'all' | 'needs_review' | 'unclassified' | 'fact';
-
-function flattenLeafSteps(steps: ParsedStep[]): ParsedStep[] {
-  const out: ParsedStep[] = [];
-  const visit = (nodes: ParsedStep[]) => {
-    for (const node of nodes) {
-      if (node.children.length > 0) {
-        visit(node.children);
-      } else {
-        out.push(node);
-      }
-    }
-  };
-  visit(steps);
-  return out;
-}
-
-function attachSourceMeta(steps: ParsedStep[], sourceName: string): ParsedStep[] {
-  return steps.map((step) => ({
-    ...step,
-    sourceId: sourceName,
-    sourceName,
-    children: attachSourceMeta(step.children, sourceName),
-  }));
-}
 
 interface ParsedSourceFile {
   id: string;
   name: string;
   steps: ParsedStep[];
 }
-
-interface ParseSingleFileResult {
-  name: string;
-  text: string;
-  pages?: string[];
-}
-
-type UploadedSourceType = 'none' | 'pdf' | 'docx' | 'text';
 
 export default function TextImportModal({ onClose }: TextImportModalProps) {
   const importProject = useAppStore((s) => s.importProject);
@@ -91,7 +49,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [parsedSteps, setParsedSteps] = useState<ParsedStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [useAi, setUseAi] = useState(true);
+  const [useAi, setUseAi] = useState(false);
   const [wasAiParsed, setWasAiParsed] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -101,13 +59,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [dedupePolicy, setDedupePolicy] = useState<DedupePolicy>('within_file');
   const [parsedFiles, setParsedFiles] = useState<ParsedSourceFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
-  const [sourceType, setSourceType] = useState<UploadedSourceType>('none');
-  const [sourceFileName, setSourceFileName] = useState('');
-  const [sourcePageTexts, setSourcePageTexts] = useState<string[]>([]);
-  const [importInterpretation, setImportInterpretation] = useState<ImportInterpretation | null>(null);
-  const [showInterpretation, setShowInterpretation] = useState(false);
-  const [deepPromptCopied, setDeepPromptCopied] = useState(false);
-  const [overviewFilter, setOverviewFilter] = useState<OverviewFilter>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const aiAvailable = hasApiKey();
@@ -128,25 +79,17 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     return base;
   }, [displayedSteps, factCount, alwaysIncludeFacts]);
 
-  const flatSteps = useMemo(() => flattenLeafSteps(displayedSteps), [displayedSteps]);
-
-  const hierarchySummary = useMemo(() => summarizeHierarchy(displayedSteps), [displayedSteps]);
-
-  const filteredInterpretationPages = useMemo(() => {
-    if (!importInterpretation) return [];
-    if (overviewFilter === 'all') return importInterpretation.pages;
-    return importInterpretation.pages
-      .map((page) => ({
-        ...page,
-        blocks: page.blocks.filter((block) => {
-          if (overviewFilter === 'needs_review') {
-            return block.cluster === 'unclassified' || block.confidence < 0.75;
-          }
-          return block.cluster === overviewFilter;
-        }),
-      }))
-      .filter((page) => page.blocks.length > 0);
-  }, [importInterpretation, overviewFilter]);
+  const flatSteps = useMemo(() => {
+    const flat: ParsedStep[] = [];
+    for (const step of displayedSteps) {
+      if (step.children.length > 0) {
+        flat.push(...step.children);
+      } else {
+        flat.push(step);
+      }
+    }
+    return flat;
+  }, [displayedSteps]);
 
   const handleBasicParse = useCallback(() => {
     if (!text.trim()) return;
@@ -187,6 +130,13 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       handleBasicParse();
     }
   }, [useAi, aiAvailable, handleRequestAiParse, handleBasicParse]);
+
+  const handleImportAsDraft = useCallback(() => {
+    if (parsedSteps.length === 0) return;
+    const project = stepsToProject(parsedSteps, projectName || 'Imported Journey', true, wasAiParsed);
+    importProject(JSON.stringify(project));
+    onClose();
+  }, [parsedSteps, projectName, importProject, onClose, wasAiParsed]);
 
   const handleImportFinal = useCallback(() => {
     if (parsedSteps.length === 0) return;
@@ -250,10 +200,9 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     fileInputRef.current?.click();
   }, []);
 
-  const parseSingleFile = useCallback(async (file: File): Promise<ParseSingleFileResult> => {
+  const parseSingleFile = useCallback(async (file: File): Promise<{ name: string; text: string }> => {
     const name = file.name.toLowerCase();
     let fileText = '';
-    let pageTexts: string[] | undefined;
     if (name.endsWith('.pdf')) {
       const pdfjsLib = await import('pdfjs-dist');
       pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString();
@@ -276,14 +225,13 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         pages.push(lines.join(''));
       }
       fileText = pages.join('\n\n');
-      pageTexts = pages.map((p) => p.trim()).filter((p) => p.length > 0);
     } else if (name.endsWith('.docx')) {
       const { extractDocxText } = await import('../utils/exportImport');
       fileText = await extractDocxText(file);
     } else {
       fileText = await file.text();
     }
-    return { name: file.name, text: fileText, pages: pageTexts };
+    return { name: file.name, text: fileText };
   }, []);
 
   const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
@@ -295,32 +243,21 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     try {
       if (files.length === 1) {
         const parsed = await parseSingleFile(files[0]);
-        const lowerName = files[0].name.toLowerCase();
         setText(parsed.text);
         setParsedFiles([]);
         setActiveFileId(null);
-        if (lowerName.endsWith('.pdf')) {
-          const pages = parsed.pages ?? [];
-          setSourceType('pdf');
-          setSourceFileName(files[0].name);
-          setSourcePageTexts(pages);
-          setImportInterpretation(buildImportInterpretation(files[0].name, pages));
-        } else {
-          setSourceType(lowerName.endsWith('.docx') ? 'docx' : 'text');
-          setSourceFileName(files[0].name);
-          setSourcePageTexts([]);
-          setImportInterpretation(null);
-        }
-        setShowInterpretation(false);
-        setOverviewFilter('all');
-        setDeepPromptCopied(false);
         if (!projectName) setProjectName(parsed.name.replace(/\.\w+$/, ''));
       } else {
         const results: ParsedSourceFile[] = [];
         const mergedTextParts: string[] = [];
         for (const file of files) {
           const parsed = await parseSingleFile(file);
-          const steps = attachSourceMeta(parseTextToSteps(parsed.text), file.name);
+          const steps = parseTextToSteps(parsed.text).map((s) => ({
+            ...s,
+            sourceId: file.name,
+            sourceName: file.name,
+            children: s.children.map((c) => ({ ...c, sourceId: file.name, sourceName: file.name })),
+          }));
           results.push({ id: file.name, name: file.name, steps });
           mergedTextParts.push(`## ${file.name}\n${parsed.text}`);
         }
@@ -328,13 +265,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         setActiveFileId(results[0]?.id ?? null);
         setParsedSteps(results.flatMap((r) => r.steps));
         setText(mergedTextParts.join('\n\n'));
-        setSourceType('none');
-        setSourceFileName('Multiple files');
-        setSourcePageTexts([]);
-        setImportInterpretation(null);
-        setShowInterpretation(false);
-        setOverviewFilter('all');
-        setDeepPromptCopied(false);
         if (!projectName) setProjectName('Multi-file import');
       }
     } catch (err) {
@@ -345,57 +275,12 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     }
   }, [parseSingleFile, projectName]);
 
-  const handleSourceTextChange = useCallback((value: string) => {
-    setText(value);
-    setError('');
-    if (sourceType !== 'none') {
-      setSourceType('none');
-      setSourceFileName('');
-      setSourcePageTexts([]);
-      setImportInterpretation(null);
-      setShowInterpretation(false);
-      setOverviewFilter('all');
-      setDeepPromptCopied(false);
-    }
-  }, [sourceType]);
-
-  const notify = useCallback((message: string) => {
-    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-      window.alert(message);
-    }
-  }, []);
-
   const handleCopyPrompt = useCallback(() => {
     navigator.clipboard.writeText(getManualPrompt()).then(() => {
       setPromptCopied(true);
       setTimeout(() => setPromptCopied(false), 2000);
     });
   }, []);
-
-  const handleExportContentMap = useCallback(() => {
-    if (!importInterpretation) return;
-    const html = buildContentMapHtml(importInterpretation);
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const baseName = (sourceFileName || importInterpretation.sourceName || 'import-content-map').replace(/\.[^/.]+$/, '');
-    link.href = url;
-    link.download = `${baseName}-content-map.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    notify(`Downloaded ${baseName}-content-map.html`);
-  }, [importInterpretation, sourceFileName, notify]);
-
-  const handleCopyDeepVisualPrompt = useCallback(() => {
-    if (!sourceFileName || sourceType !== 'pdf') return;
-    navigator.clipboard.writeText(buildDeepVisualPrompt(sourceFileName, sourcePageTexts.length)).then(() => {
-      setDeepPromptCopied(true);
-      setTimeout(() => setDeepPromptCopied(false), 2000);
-      notify('Copied deep visual prompt to clipboard.');
-    });
-  }, [sourceFileName, sourceType, sourcePageTexts.length, notify]);
 
   const activeStepNum =
     wizardStep === 'paste' || wizardStep === 'confirm-ai'
@@ -471,7 +356,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                   className="modal__textarea"
                   placeholder={PLACEHOLDER}
                   value={text}
-                  onChange={(e) => handleSourceTextChange(e.target.value)}
+                  onChange={(e) => { setText(e.target.value); setError(''); }}
                   rows={14}
                 />
                 <input
@@ -553,162 +438,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                 Recommended: continue to customize categories and allocate steps before importing.
                 {factCount > 0 ? ` Detected ${factCount} fact/context statements. They will be pre-allocated to '${FACTS_CATEGORY_NAME}' in Step 4.` : ''}
               </p>
-              <div className="import-hierarchy">
-                <div className="import-hierarchy__stats">
-                  <span className="tree-review__stat">{hierarchySummary.categories} categories</span>
-                  <span className="tree-review__stat">{hierarchySummary.sections} sections</span>
-                  <span className="tree-review__stat">{hierarchySummary.processSteps} process steps</span>
-                  <span className="tree-review__stat">{hierarchySummary.estimatedMaps} map(s)</span>
-                </div>
-                <p className="import-hierarchy__hint">
-                  Planned hierarchy: Overview → Category → Section → Flow steps.
-                </p>
-                {hierarchySummary.preview.length > 0 && (
-                  <div className="import-hierarchy__preview">
-                    {hierarchySummary.preview.map((item) => (
-                      <div key={item.category} className="import-hierarchy__card">
-                        <div className="import-hierarchy__title">{item.category}</div>
-                        <div className="import-hierarchy__meta">
-                          Sections: {item.sections.length > 0 ? item.sections.join(', ') : 'None'}
-                        </div>
-                        {item.directSteps > 0 && (
-                          <div className="import-hierarchy__meta">
-                            Direct process steps: {item.directSteps}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {importInterpretation && (
-                <div className="import-map-overview">
-                  <div className="import-map-overview__head">
-                    <div>
-                      <h4>Import interpretation overview</h4>
-                      <p>{importInterpretation.sourceName} · {importInterpretation.pages.length} pages</p>
-                    </div>
-                    <div className="import-map-overview__counts">
-                      {(Object.keys(importInterpretation.countsByCluster) as ImportCluster[]).map((cluster) => (
-                        <span
-                          key={cluster}
-                          className={`import-map-overview__chip import-map-overview__chip--${cluster}`}
-                        >
-                          {CLUSTER_LABELS[cluster]} {importInterpretation.countsByCluster[cluster]}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="import-map-overview__actions">
-                    <button className="btn btn--ghost btn--sm" onClick={() => setShowInterpretation((v) => !v)}>
-                      {showInterpretation ? 'Hide page overview' : 'Show page overview'}
-                    </button>
-                    <button className="btn btn--ghost btn--sm" onClick={handleExportContentMap}>
-                      Export content map (.html)
-                    </button>
-                    <button
-                      className="btn btn--ghost btn--sm"
-                      onClick={handleCopyDeepVisualPrompt}
-                      disabled={sourceType !== 'pdf'}
-                    >
-                      {deepPromptCopied ? 'Deep visual prompt copied!' : 'Copy Claude deep visual prompt'}
-                    </button>
-                  </div>
-                  <div className="import-map-overview__filters">
-                    <span>Filter:</span>
-                    <button
-                      className={`toolbar__toggle ${overviewFilter === 'all' ? 'toolbar__toggle--active' : ''}`}
-                      onClick={() => setOverviewFilter('all')}
-                    >
-                      All
-                    </button>
-                    <button
-                      className={`toolbar__toggle ${overviewFilter === 'needs_review' ? 'toolbar__toggle--active' : ''}`}
-                      onClick={() => setOverviewFilter('needs_review')}
-                    >
-                      Needs review ({importInterpretation.reviewCount})
-                    </button>
-                    <button
-                      className={`toolbar__toggle ${overviewFilter === 'unclassified' ? 'toolbar__toggle--active' : ''}`}
-                      onClick={() => setOverviewFilter('unclassified')}
-                    >
-                      Unclassified ({importInterpretation.reviewCountByCluster.unclassified})
-                    </button>
-                    <button
-                      className={`toolbar__toggle ${overviewFilter === 'fact' ? 'toolbar__toggle--active' : ''}`}
-                      onClick={() => setOverviewFilter('fact')}
-                    >
-                      Facts ({importInterpretation.countsByCluster.fact})
-                    </button>
-                  </div>
-                  <div className="import-map-overview__summary">
-                    {importInterpretation.reviewCount}/{importInterpretation.totalBlocks} blocks need review
-                    {overviewFilter !== 'all' ? ` · showing ${overviewFilter.replace('_', ' ')}` : ''}
-                  </div>
-                  {showInterpretation && (
-                    <>
-                      {filteredInterpretationPages.length === 0 && (
-                        <div className="import-map-overview__empty">No blocks match this filter.</div>
-                      )}
-                      <div className="import-map-overview__pages">
-                        {filteredInterpretationPages.map((page) => (
-                          <div key={page.page} className="import-map-page">
-                            <div className="import-map-page__title">
-                              Page {page.page} · {CLUSTER_LABELS[page.dominantCluster]}
-                            </div>
-                            <div className="import-map-page__blocks">
-                              {page.blocks.map((block) => (
-                                <article
-                                  key={block.id}
-                                  className={`import-map-block import-map-block--${block.cluster}${block.cluster === 'unclassified' || block.confidence < 0.75 ? ' import-map-block--needs-review' : ''}`}
-                                >
-                                  <div className="import-map-block__top">
-                                    <span className="import-map-block__badge">{CLUSTER_LABELS[block.cluster]}</span>
-                                    <span className="import-map-block__confidence">{block.confidence.toFixed(2)}</span>
-                                  </div>
-                                  <div className="import-map-block__label">{block.label}</div>
-                                  <div className="import-map-block__excerpt">{block.excerpt}</div>
-                                  <div className="import-map-block__signals">
-                                    {block.signals.map((signal) => (
-                                      <span key={`${block.id}-${signal}`}>{signal}</span>
-                                    ))}
-                                  </div>
-                                </article>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="import-map-overview__preview">
-                        <div className="import-map-preview-card">
-                          <div className="import-map-preview-card__title">Likely overview/category nodes</div>
-                          <ul>
-                            {importInterpretation.overviewLabels.length > 0
-                              ? importInterpretation.overviewLabels.map((label) => <li key={label}>{label}</li>)
-                              : <li>None detected</li>}
-                          </ul>
-                        </div>
-                        <div className="import-map-preview-card">
-                          <div className="import-map-preview-card__title">Likely facts board items</div>
-                          <ul>
-                            {importInterpretation.factsBoardLabels.length > 0
-                              ? importInterpretation.factsBoardLabels.map((label) => <li key={label}>{label}</li>)
-                              : <li>None detected</li>}
-                          </ul>
-                        </div>
-                        <div className="import-map-preview-card">
-                          <div className="import-map-preview-card__title">Likely unclassified items</div>
-                          <ul>
-                            {importInterpretation.unclassifiedLabels.length > 0
-                              ? importInterpretation.unclassifiedLabels.map((label) => <li key={label}>{label}</li>)
-                              : <li>None detected</li>}
-                          </ul>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
               {parsedFiles.length > 0 && (
                 <div className="allocator__stats" style={{ marginBottom: 8 }}>
                   {parsedFiles.map((f) => (
@@ -813,8 +542,11 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
               <button className="btn btn--primary" onClick={handleCustomImport} disabled={parsedSteps.length === 0}>
                 Continue to Customize Categories →
               </button>
+              <button className="btn btn--secondary" onClick={handleImportAsDraft} disabled={parsedSteps.length === 0}>
+                Quick Import as Draft
+              </button>
               <button className="btn btn--secondary" onClick={handleImportFinal} disabled={parsedSteps.length === 0}>
-                Quick Import
+                Quick Import & Finalize
               </button>
             </>
           )}
