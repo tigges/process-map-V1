@@ -44,21 +44,6 @@ type GroupingMode = 'per_file' | 'shared_categories';
 type DedupePolicy = 'within_file' | 'cross_file_safe';
 type OverviewFilter = 'all' | 'needs_review' | 'unclassified' | 'fact';
 
-function flattenLeafSteps(steps: ParsedStep[]): ParsedStep[] {
-  const out: ParsedStep[] = [];
-  const visit = (nodes: ParsedStep[]) => {
-    for (const node of nodes) {
-      if (node.children.length > 0) {
-        visit(node.children);
-      } else {
-        out.push(node);
-      }
-    }
-  };
-  visit(steps);
-  return out;
-}
-
 function attachSourceMeta(steps: ParsedStep[], sourceName: string): ParsedStep[] {
   return steps.map((step) => ({
     ...step,
@@ -127,8 +112,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
     if (alwaysIncludeFacts || factCount > 0) return ensureFactsCategory(base);
     return base;
   }, [displayedSteps, factCount, alwaysIncludeFacts]);
-
-  const flatSteps = useMemo(() => flattenLeafSteps(displayedSteps), [displayedSteps]);
 
   const hierarchySummary = useMemo(() => summarizeHierarchy(displayedSteps), [displayedSteps]);
 
@@ -780,7 +763,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
           {wizardStep === 'allocate' && (
             <StepAllocator
               categories={categories}
-              steps={flatSteps}
+              steps={displayedSteps}
               onConfirm={handleAllocateConfirm}
               onBack={() => setWizardStep('categories')}
             />
