@@ -21,6 +21,9 @@ export interface ImportInterpretation {
   sourceName: string;
   pages: PageInterpretation[];
   countsByCluster: Record<ImportCluster, number>;
+  reviewCountByCluster: Record<ImportCluster, number>;
+  totalBlocks: number;
+  reviewCount: number;
   overviewLabels: string[];
   factsBoardLabels: string[];
   unclassifiedLabels: string[];
@@ -187,6 +190,15 @@ export function buildImportInterpretation(sourceName: string, pageTexts: string[
     fact: 0,
     unclassified: 0,
   };
+  const reviewCountByCluster: Record<ImportCluster, number> = {
+    context_process_category: 0,
+    process: 0,
+    subprocess: 0,
+    fact: 0,
+    unclassified: 0,
+  };
+  let totalBlocks = 0;
+  let reviewCount = 0;
   const overviewLabels: string[] = [];
   const factsBoardLabels: string[] = [];
   const unclassifiedLabels: string[] = [];
@@ -211,7 +223,13 @@ export function buildImportInterpretation(sourceName: string, pageTexts: string[
       };
       blockIndex++;
       blocks.push(next);
+      totalBlocks++;
       countsByCluster[next.cluster]++;
+      const isNeedsReview = next.confidence < 0.75 || next.cluster === 'unclassified';
+      if (isNeedsReview) {
+        reviewCount++;
+        reviewCountByCluster[next.cluster]++;
+      }
       if (next.cluster === 'context_process_category') overviewLabels.push(next.label);
       if (next.cluster === 'fact') factsBoardLabels.push(next.label);
       if (next.cluster === 'unclassified') unclassifiedLabels.push(next.label);
@@ -256,6 +274,9 @@ export function buildImportInterpretation(sourceName: string, pageTexts: string[
     sourceName,
     pages,
     countsByCluster,
+    reviewCountByCluster,
+    totalBlocks,
+    reviewCount,
     overviewLabels: uniqueLimit(overviewLabels, 8),
     factsBoardLabels: uniqueLimit(factsBoardLabels, 8),
     unclassifiedLabels: uniqueLimit(unclassifiedLabels, 8),
