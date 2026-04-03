@@ -17,6 +17,21 @@ export interface ParsedStep {
   sourceName?: string;
 }
 
+export interface HierarchyPreviewItem {
+  category: string;
+  sections: string[];
+  directSteps: number;
+}
+
+export interface HierarchySummary {
+  categories: number;
+  sections: number;
+  processSteps: number;
+  nestedSubprocesses: number;
+  estimatedMaps: number;
+  preview: HierarchyPreviewItem[];
+}
+
 const NODE_COLORS: Record<JourneyNodeType, string> = {
   start: '#22c55e', action: '#3b82f6', decision: '#eab308',
   end: '#ef4444', subprocess: '#64748b',
@@ -346,8 +361,27 @@ function isHeaderLine(line: string): boolean {
   return false;
 }
 
+function inferHeaderLevel(line: string, hasCategoryContext: boolean): 1 | 2 {
+  const trimmed = line.trim();
+  const numbered = trimmed.match(/^(\d+(?:\.\d+)*)(?:[.)])?\s+/);
+  if (numbered) {
+    const depth = numbered[1].split('.').filter(Boolean).length;
+    return depth >= 2 ? 2 : 1;
+  }
+  const markdown = trimmed.match(/^(#{1,6})\s+/);
+  if (markdown) {
+    return markdown[1].length >= 2 ? 2 : 1;
+  }
+  if (trimmed === trimmed.toUpperCase() && hasCategoryContext) return 2;
+  return hasCategoryContext ? 2 : 1;
+}
+
 function cleanHeaderPrefix(line: string): string {
-  return line.trim().replace(/^\d+[.)]\s*/, '').replace(/^[\d.]+\s+/, '').replace(/^#{1,3}\s*/, '').trim();
+  return line
+    .trim()
+    .replace(/^\d+(?:\.\d+)*(?:[.)])?\s+/, '')
+    .replace(/^#{1,6}\s+/, '')
+    .trim();
 }
 
 function cleanDashPrefix(line: string): string { return line.trim().replace(/^[-*•]\s*/, ''); }
@@ -369,50 +403,142 @@ export function parseTextToSteps(text: string): ParsedStep[] {
   const cleaned = cleanupText(text);
   const lines = cleaned.split('\n').filter((l) => l.trim().length > 0);
   const steps: ParsedStep[] = [];
-  let currentParent: ParsedStep | null = null;
+  let currentCategory: ParsedStep | null = null;
+  let currentSection: ParsedStep | null = null;
 
   for (const rawLine of lines) {
     const trimmed = rawLine.trim();
     if (!trimmed) continue;
 
     if (isHeaderLine(trimmed)) {
+      const headerLevel = inferHeaderLevel(trimmed, Boolean(currentCategory));
       const content = cleanHeaderPrefix(trimmed);
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = smartSplitLabel(afterPrefix);
-      currentParent = {
+      const headerStep: ParsedStep = {
         id: nanoid(), label, description,
-        nodeType: explicitType ?? 'subprocess', children: [], indent: 0,
+        nodeType: explicitType ?? 'subprocess',
+        children: [],
+        indent: headerLevel === 1 ? 0 : 1,
       };
-      steps.push(currentParent);
-    } else if (currentParent) {
+      if (headerLevel === 1 || !currentCategory) {
+        currentCategory = headerStep;
+        currentSection = null;
+        steps.push(currentCategory);
+      } else {
+        currentCategory.children.push(headerStep);
+        currentSection = headerStep;
+      }
+    } else if (currentSection || currentCategory) {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = smartSplitLabel(afterPrefix);
       const nodeType = explicitType ?? classifyByContent(afterPrefix);
       const actor = detectActor(afterPrefix);
       const desc = actor ? `[${actor}] ${description}` : description;
-      currentParent.children.push({
-        id: nanoid(), label, description: desc, nodeType, children: [], indent: 1,
-      });
+      const step: ParsedStep = {
+        id: nanoid(), label, description: desc, nodeType, children: [],
+        indent: currentSection ? 2 : 1,
+      };
+      if (currentSection) {
+        currentSection.children.push(step);
+      } else if (currentCategory) {
+        currentCategory.children.push(step);
+      }
     } else {
       const content = isDashedLine(trimmed) ? cleanDashPrefix(trimmed) : trimmed;
       const { type: explicitType, cleaned: afterPrefix } = extractTypePrefix(content);
       const { label, description } = smartSplitLabel(afterPrefix);
-      currentParent = {
+      currentCategory = {
         id: nanoid(), label, description,
-        nodeType: explicitType ?? classifyByContent(afterPrefix), children: [], indent: 0,
+        nodeType: explicitType ?? 'subprocess',
+        children: [],
+        indent: 0,
       };
-      steps.push(currentParent);
+      currentSection = null;
+      steps.push(currentCategory);
     }
   }
 
-  for (const step of steps) {
-    if (step.children.length > 0 && step.nodeType !== 'subprocess') {
-      step.nodeType = 'subprocess';
+  for (const category of steps) {
+    if (category.children.length > 0 && category.nodeType !== 'subprocess') {
+      category.nodeType = 'subprocess';
+    }
+    for (const section of category.children) {
+      if (section.children.length > 0 && section.nodeType !== 'subprocess') {
+        section.nodeType = 'subprocess';
+      }
     }
   }
 
   return annotateSemanticSteps(steps);
+}
+
+function countLeafSteps(steps: ParsedStep[]): number {
+  let count = 0;
+  for (const step of steps) {
+    if (step.children.length === 0) {
+      count++;
+    } else {
+      count += countLeafSteps(step.children);
+    }
+  }
+  return count;
+}
+
+function countNestedContainers(steps: ParsedStep[], depth = 0): number {
+  let count = 0;
+  for (const step of steps) {
+    if (depth > 0 && step.children.length > 0) count++;
+    if (step.children.length > 0) count += countNestedContainers(step.children, depth + 1);
+  }
+  return count;
+}
+
+function countMapsFromHierarchy(steps: ParsedStep[]): number {
+  let maps = 1; // root overview map
+  const visit = (nodes: ParsedStep[]) => {
+    for (const node of nodes) {
+      if (node.children.length > 0) {
+        maps++;
+        visit(node.children);
+      }
+    }
+  };
+  visit(steps);
+  return maps;
+}
+
+export function summarizeHierarchy(steps: ParsedStep[]): HierarchySummary {
+  const categories = steps.length;
+  const sections = steps.reduce(
+    (sum, step) => sum + step.children.filter((child) => child.children.length > 0 || child.nodeType === 'subprocess').length,
+    0,
+  );
+  const processSteps = countLeafSteps(steps);
+  const nestedSubprocesses = countNestedContainers(steps);
+  const estimatedMaps = countMapsFromHierarchy(steps);
+  const preview = steps.slice(0, 5).map((step) => {
+    const sectionLabels = step.children
+      .filter((child) => child.children.length > 0 || child.nodeType === 'subprocess')
+      .map((child) => child.label)
+      .slice(0, 4);
+    const directSteps = step.children.filter((child) => child.children.length === 0 && child.nodeType !== 'subprocess').length;
+    return {
+      category: step.label,
+      sections: sectionLabels,
+      directSteps,
+    };
+  });
+
+  return {
+    categories,
+    sections,
+    processSteps,
+    nestedSubprocesses,
+    estimatedMaps,
+    preview,
+  };
 }
 
 // ───── NORMALIZATION (shared post-parse layer) ─────
@@ -612,6 +738,81 @@ export function stepsToProject(
   const rawOverviewNodes: Node<JourneyNodeData>[] = [];
   let colorIdx = 0;
 
+  const buildCategorySubMap = (
+    parentStep: ParsedStep,
+    parentMapId: string,
+    parentNodeId: string,
+  ): string => {
+    const categoryMapId = nanoid();
+    const sectionNodes = parentStep.children.filter((child) => child.children.length > 0);
+    const directFlowSteps = parentStep.children.filter((child) => child.children.length === 0);
+    const categoryOverviewNodes: Node<JourneyNodeData>[] = [];
+
+    for (const section of sectionNodes) {
+      const sectionNodeId = nanoid();
+      const sectionColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
+      colorIdx++;
+      const sectionMapId = nanoid();
+      const { nodes: sectionNodesFlow, edges: sectionEdgesFlow } = buildFlowMap(section.children);
+      maps[sectionMapId] = {
+        id: sectionMapId,
+        name: section.label,
+        description: section.description || '',
+        parentMapId: categoryMapId,
+        parentNodeId: sectionNodeId,
+        nodes: sectionNodesFlow,
+        edges: sectionEdgesFlow,
+      };
+      categoryOverviewNodes.push(buildOverviewNode(
+        sectionNodeId,
+        section.label,
+        section.description ? `${section.description} (${section.children.length} steps)` : `${section.children.length} steps`,
+        sectionColor,
+        sectionMapId,
+      ));
+    }
+
+    if (directFlowSteps.length > 0) {
+      const directNodeId = nanoid();
+      const directMapId = nanoid();
+      const { nodes: directNodes, edges: directEdges } = buildFlowMap(directFlowSteps);
+      maps[directMapId] = {
+        id: directMapId,
+        name: `${parentStep.label} Flow`,
+        description: `${directFlowSteps.length} direct steps`,
+        parentMapId: categoryMapId,
+        parentNodeId: directNodeId,
+        nodes: directNodes,
+        edges: directEdges,
+      };
+      categoryOverviewNodes.push(buildOverviewNode(
+        directNodeId,
+        'Direct Flow',
+        `${directFlowSteps.length} steps`,
+        '#64748b',
+        directMapId,
+      ));
+    }
+
+    const cols = Math.min(Math.ceil(Math.sqrt(categoryOverviewNodes.length || 1)), 3);
+    const positionedCategoryNodes = categoryOverviewNodes.map((n, i) => ({
+      ...n,
+      position: { x: (i % cols) * 280, y: Math.floor(i / cols) * 160 },
+    }));
+
+    maps[categoryMapId] = {
+      id: categoryMapId,
+      name: parentStep.label,
+      description: parentStep.description || '',
+      parentMapId,
+      parentNodeId,
+      nodes: positionedCategoryNodes,
+      edges: [],
+    };
+
+    return categoryMapId;
+  };
+
   if (shouldSkipClustering) {
     for (const step of validSteps) {
       const nodeId = nanoid();
@@ -621,29 +822,11 @@ export function stepsToProject(
 
       let subMapId: string | undefined;
       if (hasChildren) {
-        subMapId = nanoid();
-        const allSubprocess = step.children.every((c) => c.children.length > 0 || c.nodeType === 'subprocess');
-
-        if (allSubprocess && step.children.length > 1) {
-          const subOverviewNodes: Node<JourneyNodeData>[] = [];
-          for (const child of step.children) {
-            const childNodeId = nanoid();
-            const childColor = CATEGORY_COLORS[colorIdx % CATEGORY_COLORS.length];
-            colorIdx++;
-            let childSubMapId: string | undefined;
-            if (child.children.length > 0) {
-              childSubMapId = nanoid();
-              const { nodes: cNodes, edges: cEdges } = buildFlowMap(child.children);
-              maps[childSubMapId] = { id: childSubMapId, name: child.label, description: child.description || '', parentMapId: subMapId, parentNodeId: childNodeId, nodes: cNodes, edges: cEdges };
-            }
-            subOverviewNodes.push(buildOverviewNode(childNodeId, child.label,
-              child.description ? `${child.description} (${child.children.length} steps)` : `${child.children.length} steps`,
-              childColor, childSubMapId));
-          }
-          const cols = Math.min(Math.ceil(Math.sqrt(subOverviewNodes.length)), 3);
-          const positioned = subOverviewNodes.map((n, i) => ({ ...n, position: { x: (i % cols) * 280, y: Math.floor(i / cols) * 160 } }));
-          maps[subMapId] = { id: subMapId, name: step.label, description: step.description || '', parentMapId: rootMapId, parentNodeId: nodeId, nodes: positioned, edges: [] };
+        const hasSectionHierarchy = step.children.some((child) => child.children.length > 0);
+        if (hasSectionHierarchy) {
+          subMapId = buildCategorySubMap(step, rootMapId, nodeId);
         } else {
+          subMapId = nanoid();
           const { nodes: subNodes, edges: subEdges } = buildFlowMap(step.children);
           maps[subMapId] = { id: subMapId, name: step.label, description: step.description || '', parentMapId: rootMapId, parentNodeId: nodeId, nodes: subNodes, edges: subEdges };
         }
