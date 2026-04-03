@@ -514,7 +514,13 @@ function buildFlowMap(steps: ParsedStep[]): { nodes: Node<JourneyNodeData>[]; ed
     const nodeId = nanoid();
     rawNodes.push({
       id: nodeId, type: 'journeyNode', position: { x: 0, y: 0 },
-      data: { label: step.label, description: step.description, nodeType: step.nodeType, color: NODE_COLORS[step.nodeType] },
+      data: {
+        label: step.label,
+        description: step.description,
+        nodeType: step.nodeType,
+        color: NODE_COLORS[step.nodeType],
+        sourceStepId: step.id,
+      },
     });
     rawEdges.push(makeEdge(prevId, nodeId));
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, type ChangeEvent } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect, type ChangeEvent } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import {
   parseTextToSteps,
@@ -10,6 +10,12 @@ import {
   countFactCandidates,
   type ParsedStep,
 } from '../utils/textParser';
+import {
+  buildParsedStepConnectionCandidates,
+  buildParsedStepNumberMap,
+  resolveDraftConnectionSuggestions,
+  type ParsedConnectionPreview,
+} from '../utils/connectionSuggestions';
 import { hasApiKey, smartParse, estimateCost, getManualPrompt } from '../utils/claudeApi';
 import {
   buildImportInterpretation,
@@ -43,6 +49,13 @@ type GroupingMode = 'per_file' | 'shared_categories';
 type DedupePolicy = 'within_file' | 'cross_file_safe';
 type OverviewFilter = 'all' | 'needs_review' | 'unclassified' | 'fact';
 
+interface ConnectionDraftLink {
+  sourceStepId: string;
+  targetStepId: string;
+  reason: string;
+  confidence: number;
+}
+
 interface ParsedSourceFile {
   id: string;
   name: string;
@@ -59,6 +72,8 @@ type UploadedSourceType = 'none' | 'pdf' | 'docx' | 'text';
 
 export default function TextImportModal({ onClose }: TextImportModalProps) {
   const importProject = useAppStore((s) => s.importProject);
+  const projects = useAppStore((s) => s.projects);
+  const applyConnectionSuggestions = useAppStore((s) => s.applyConnectionSuggestions);
 
   const [wizardStep, setWizardStep] = useState<WizardStep>('paste');
   const [text, setText] = useState('');
@@ -83,6 +98,10 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const [showInterpretation, setShowInterpretation] = useState(false);
   const [deepPromptCopied, setDeepPromptCopied] = useState(false);
   const [overviewFilter, setOverviewFilter] = useState<OverviewFilter>('all');
+  const [showConnectionPreview, setShowConnectionPreview] = useState(false);
+  const [connectionDrafts, setConnectionDrafts] = useState<ConnectionDraftLink[]>([]);
+  const [isConnectionWizardOpen, setIsConnectionWizardOpen] = useState(false);
+  const [connectionWizardProjectId, setConnectionWizardProjectId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const aiAvailable = hasApiKey();
@@ -131,10 +150,81 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       .filter((page) => page.blocks.length > 0);
   }, [importInterpretation, overviewFilter]);
 
+  const stepNumberMap = useMemo(() => buildParsedStepNumberMap(displayedSteps), [displayedSteps]);
+  const connectionCandidates = useMemo(() => buildParsedStepConnectionCandidates(displayedSteps), [displayedSteps]);
+
+  const selectedConnectionIdSet = useMemo(() => (
+    new Set(connectionDrafts.map((d) => `${d.sourceStepId}->${d.targetStepId}`))
+  ), [connectionDrafts]);
+
+  const topConnectionCandidates = useMemo(() => connectionCandidates.slice(0, 8), [connectionCandidates]);
+
+  const connectionWizardProject = useMemo(() => (
+    connectionWizardProjectId ? projects.find((p) => p.id === connectionWizardProjectId) ?? null : null
+  ), [projects, connectionWizardProjectId]);
+
+  const resolvedWizardSuggestions = useMemo(() => (
+    connectionWizardProject ? resolveDraftConnectionSuggestions(connectionWizardProject, connectionDrafts) : []
+  ), [connectionWizardProject, connectionDrafts]);
+
+  const wizardSelectionSet = useMemo<Set<string>>(() => (
+    new Set(resolvedWizardSuggestions.map((s) => s.id))
+  ), [resolvedWizardSuggestions]);
+
+  const [wizardSelectedIds, setWizardSelectedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setWizardSelectedIds(wizardSelectionSet);
+  }, [wizardSelectionSet]);
+
+  const toggleWizardSuggestion = useCallback((id: string) => {
+    setWizardSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const openConnectionWizard = useCallback((projectId: string | null) => {
+    if (!projectId) return;
+    setConnectionWizardProjectId(projectId);
+    setIsConnectionWizardOpen(true);
+  }, []);
+
+  const closeConnectionWizard = useCallback(() => {
+    setIsConnectionWizardOpen(false);
+    setConnectionWizardProjectId(null);
+    onClose();
+  }, [onClose]);
+
+  const notify = useCallback((message: string) => {
+    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+      window.alert(message);
+    }
+  }, []);
+
+  const applyWizardSuggestions = useCallback(() => {
+    if (resolvedWizardSuggestions.length === 0) {
+      closeConnectionWizard();
+      return;
+    }
+    const selected = resolvedWizardSuggestions.filter((s) => wizardSelectedIds.has(s.id));
+    if (selected.length > 0) {
+      applyConnectionSuggestions(selected);
+      notify(`Applied ${selected.length} connection link(s).`);
+    } else {
+      notify('No connection links selected.');
+    }
+    closeConnectionWizard();
+  }, [resolvedWizardSuggestions, wizardSelectedIds, applyConnectionSuggestions, notify, closeConnectionWizard]);
+
   const handleBasicParse = useCallback(() => {
     if (!text.trim()) return;
     const steps = parseTextToSteps(text);
     setParsedSteps(steps);
+    setConnectionDrafts([]);
+    setShowConnectionPreview(false);
     setWizardStep('review');
   }, [text]);
 
@@ -153,6 +243,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       setParsedSteps(steps);
       setParsedFiles([]);
       setActiveFileId(null);
+      setConnectionDrafts([]);
+      setShowConnectionPreview(false);
       setWasAiParsed(true);
       setWizardStep('review');
     } catch (err) {
@@ -174,9 +266,14 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const handleImportFinal = useCallback(() => {
     if (parsedSteps.length === 0) return;
     const project = stepsToProject(parsedSteps, projectName || 'Imported Journey', false, wasAiParsed);
+    const nextProjectId = project.id;
     importProject(JSON.stringify(project));
-    onClose();
-  }, [parsedSteps, projectName, importProject, onClose, wasAiParsed]);
+    if (connectionDrafts.length > 0) {
+      openConnectionWizard(nextProjectId);
+    } else {
+      onClose();
+    }
+  }, [parsedSteps, projectName, importProject, onClose, wasAiParsed, connectionDrafts.length, openConnectionWizard]);
 
   const handleCustomImport = useCallback(() => {
     setWizardStep('categories');
@@ -220,13 +317,18 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
           dedupePolicy,
         },
       );
+      const nextProjectId = project.id;
       importProject(JSON.stringify(project));
       if (unallocated.length > 0) {
         console.info(`Moved ${unallocated.length} unallocated steps to Unclassified during import.`);
       }
-      onClose();
+      if (connectionDrafts.length > 0) {
+        openConnectionWizard(nextProjectId);
+      } else {
+        onClose();
+      }
     },
-    [projectName, importProject, onClose, groupingMode, dedupePolicy, activeFileId, parsedFiles],
+    [projectName, importProject, onClose, groupingMode, dedupePolicy, activeFileId, parsedFiles, connectionDrafts.length, openConnectionWizard],
   );
 
   const handleFileUpload = useCallback(() => {
@@ -282,6 +384,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         setText(parsed.text);
         setParsedFiles([]);
         setActiveFileId(null);
+        setConnectionDrafts([]);
+        setShowConnectionPreview(false);
         if (lowerName.endsWith('.pdf')) {
           const pages = parsed.pages ?? [];
           setSourceType('pdf');
@@ -315,6 +419,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
         setParsedFiles(results);
         setActiveFileId(results[0]?.id ?? null);
         setParsedSteps(results.flatMap((r) => r.steps));
+        setConnectionDrafts([]);
+        setShowConnectionPreview(false);
         setText(mergedTextParts.join('\n\n'));
         setSourceType('none');
         setSourceFileName('Multiple files');
@@ -336,6 +442,8 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
   const handleSourceTextChange = useCallback((value: string) => {
     setText(value);
     setError('');
+    setConnectionDrafts([]);
+    setShowConnectionPreview(false);
     if (sourceType !== 'none') {
       setSourceType('none');
       setSourceFileName('');
@@ -346,12 +454,6 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       setDeepPromptCopied(false);
     }
   }, [sourceType]);
-
-  const notify = useCallback((message: string) => {
-    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-      window.alert(message);
-    }
-  }, []);
 
   const handleCopyPrompt = useCallback(() => {
     navigator.clipboard.writeText(getManualPrompt()).then(() => {
@@ -384,6 +486,27 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
       notify('Copied deep visual prompt to clipboard.');
     });
   }, [sourceFileName, sourceType, sourcePageTexts.length, notify]);
+
+  const toggleConnectionDraft = useCallback((candidate: ParsedConnectionPreview) => {
+    const key = `${candidate.sourceStepId}->${candidate.targetStepId}`;
+    setConnectionDrafts((prev) => {
+      const exists = prev.some((d) => `${d.sourceStepId}->${d.targetStepId}` === key);
+      if (exists) return prev.filter((d) => `${d.sourceStepId}->${d.targetStepId}` !== key);
+      return [
+        ...prev,
+        {
+          sourceStepId: candidate.sourceStepId,
+          targetStepId: candidate.targetStepId,
+          reason: candidate.reason,
+          confidence: candidate.confidence,
+        },
+      ];
+    });
+  }, []);
+
+  const clearConnectionDrafts = useCallback(() => {
+    setConnectionDrafts([]);
+  }, []);
 
   const activeStepNum =
     wizardStep === 'paste' || wizardStep === 'confirm-ai'
@@ -669,6 +792,62 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
                   )}
                 </div>
               )}
+              {connectionCandidates.length > 0 && (
+                <div className="import-connections">
+                  <div className="import-connections__head">
+                    <h4>Potential process connections</h4>
+                    <p>{connectionCandidates.length} candidate links from numbering + topic overlap</p>
+                  </div>
+                  <div className="import-connections__actions">
+                    <button
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => setShowConnectionPreview((v) => !v)}
+                    >
+                      {showConnectionPreview ? 'Hide suggestions' : 'Show suggestions'}
+                    </button>
+                    <button
+                      className="btn btn--ghost btn--sm"
+                      onClick={clearConnectionDrafts}
+                      disabled={connectionDrafts.length === 0}
+                    >
+                      Clear selected ({connectionDrafts.length})
+                    </button>
+                  </div>
+                  {showConnectionPreview && (
+                    <div className="import-connections__list">
+                      {topConnectionCandidates.map((candidate) => {
+                        const key = `${candidate.sourceStepId}->${candidate.targetStepId}`;
+                        const selected = selectedConnectionIdSet.has(key);
+                        return (
+                          <label
+                            key={candidate.id}
+                            className={`import-connections__item ${selected ? 'import-connections__item--selected' : ''}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => toggleConnectionDraft(candidate)}
+                            />
+                            <div className="import-connections__item-main">
+                              <div className="import-connections__item-title">
+                                {candidate.sourceNumber ? `${candidate.sourceNumber} ` : ''}{candidate.sourceLabel}
+                                {' -> '}
+                                {candidate.targetNumber ? `${candidate.targetNumber} ` : ''}{candidate.targetLabel}
+                              </div>
+                              <div className="import-connections__item-meta">
+                                {candidate.reason} · {Math.round(candidate.confidence * 100)}%
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="import-connections__hint">
+                    Selected links will open in a post-import connection wizard for final approval.
+                  </p>
+                </div>
+              )}
               {parsedFiles.length > 0 && (
                 <div className="allocator__stats" style={{ marginBottom: 8 }}>
                   {parsedFiles.map((f) => (
@@ -684,6 +863,7 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
               )}
               <ParsedTreeReview
                 steps={displayedSteps}
+                numberMap={stepNumberMap}
                 onUpdate={(updated) => {
                   if (!activeFileId) {
                     setParsedSteps(updated);
@@ -780,6 +960,55 @@ export default function TextImportModal({ onClose }: TextImportModalProps) {
           )}
           {/* categories and allocate steps have their own footers inline */}
         </div>
+        {isConnectionWizardOpen && (
+          <div className="modal-overlay" onClick={closeConnectionWizard}>
+            <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
+              <div className="modal__header">
+                <h2 className="modal__title">Connection Wizard</h2>
+                <button className="modal__close" onClick={closeConnectionWizard}>✕</button>
+              </div>
+              <div className="modal__body">
+                <p className="modal__hint">
+                  Review suggested links between imported steps. Only same-map links are included.
+                </p>
+                {resolvedWizardSuggestions.length === 0 ? (
+                  <div className="import-connections__empty">No valid same-map suggestions found.</div>
+                ) : (
+                  <div className="import-connections__list">
+                    {resolvedWizardSuggestions.map((suggestion) => (
+                      <label
+                        key={suggestion.id}
+                        className={`import-connections__item ${wizardSelectedIds.has(suggestion.id) ? 'import-connections__item--selected' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={wizardSelectedIds.has(suggestion.id)}
+                          onChange={() => toggleWizardSuggestion(suggestion.id)}
+                        />
+                        <div className="import-connections__item-main">
+                          <div className="import-connections__item-title">
+                            {suggestion.sourceNumber ? `${suggestion.sourceNumber} ` : ''}{suggestion.sourceLabel}
+                            {' -> '}
+                            {suggestion.targetNumber ? `${suggestion.targetNumber} ` : ''}{suggestion.targetLabel}
+                          </div>
+                          <div className="import-connections__item-meta">
+                            {suggestion.reason} · {Math.round(suggestion.confidence * 100)}%
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="modal__footer">
+                <button className="btn btn--ghost" onClick={closeConnectionWizard}>Skip</button>
+                <button className="btn btn--primary" onClick={applyWizardSuggestions}>
+                  Apply Selected ({wizardSelectedIds.size})
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

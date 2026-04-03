@@ -4,6 +4,7 @@ import type { ParsedStep } from '../utils/textParser';
 
 interface ParsedTreeReviewProps {
   steps: ParsedStep[];
+  numberMap?: Map<string, string>;
   onUpdate: (steps: ParsedStep[]) => void;
 }
 
@@ -12,17 +13,20 @@ const nodeTypeOptions = Object.entries(NODE_TYPE_CONFIG) as [JourneyNodeType, (t
 function StepRow({
   step,
   depth,
+  numberMap,
   onUpdate,
   onDelete,
 }: {
   step: ParsedStep;
   depth: number;
+  numberMap?: Map<string, string>;
   onUpdate: (updated: ParsedStep) => void;
   onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editLabel, setEditLabel] = useState(step.label);
   const config = NODE_TYPE_CONFIG[step.nodeType];
+  const stepNumber = numberMap?.get(step.id);
 
   const handleSave = useCallback(() => {
     onUpdate({ ...step, label: editLabel });
@@ -39,6 +43,7 @@ function StepRow({
   return (
     <>
       <div className="tree-row" style={{ paddingLeft: 12 + depth * 20 }}>
+        {stepNumber && <span className="tree-row__num">{stepNumber}</span>}
         <span className="tree-row__icon">{config.icon}</span>
         {editing ? (
           <input
@@ -70,6 +75,7 @@ function StepRow({
           key={child.id}
           step={child}
           depth={depth + 1}
+          numberMap={numberMap}
           onUpdate={(updated) => {
             const newChildren = [...step.children];
             newChildren[ci] = updated;
@@ -84,7 +90,7 @@ function StepRow({
   );
 }
 
-export default function ParsedTreeReview({ steps, onUpdate }: ParsedTreeReviewProps) {
+export default function ParsedTreeReview({ steps, numberMap, onUpdate }: ParsedTreeReviewProps) {
   const totalChildren = steps.reduce((sum, s) => sum + s.children.length, 0);
   const totalMaps = steps.filter((s) => s.children.length > 0).length + 1;
 
@@ -104,6 +110,7 @@ export default function ParsedTreeReview({ steps, onUpdate }: ParsedTreeReviewPr
             key={step.id}
             step={step}
             depth={0}
+            numberMap={numberMap}
             onUpdate={(updated) => {
               const newSteps = [...steps];
               newSteps[i] = updated;

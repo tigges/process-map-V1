@@ -41,6 +41,7 @@ export interface JourneyNodeData {
   nodeType: JourneyNodeType;
   color: string;
   subMapId?: string;
+  sourceStepId?: string;
   [key: string]: unknown;
 }
 

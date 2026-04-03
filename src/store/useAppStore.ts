@@ -19,6 +19,7 @@ import type {
 import { NODE_TYPE_CONFIG } from '../types';
 import { createSampleProject } from '../data/sampleProject';
 import { saveProjects, loadProjects, saveFolders, loadFolders } from '../utils/storage';
+import type { ConnectionSuggestion } from '../utils/connectionSuggestions';
 
 interface AppState {
   projects: ProcessMapProject[];
@@ -65,6 +66,7 @@ interface AppState {
   // Export / Import
   exportActiveProject: () => string;
   importProject: (json: string) => void;
+  applyConnectionSuggestions: (suggestions: ConnectionSuggestion[]) => void;
 
   // Draft management
   finalizeProject: (id: string) => void;
@@ -429,6 +431,68 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (e) {
       console.error('Import failed:', e);
     }
+  },
+
+  applyConnectionSuggestions(suggestions) {
+    if (!suggestions || suggestions.length === 0) return;
+    set((state) => {
+      const byProject = new Map<string, ConnectionSuggestion[]>();
+      for (const suggestion of suggestions) {
+        const existing = byProject.get(suggestion.projectId) ?? [];
+        existing.push(suggestion);
+        byProject.set(suggestion.projectId, existing);
+      }
+
+      const nextProjects = state.projects.map((project) => {
+        const projectSuggestions = byProject.get(project.id);
+        if (!projectSuggestions || projectSuggestions.length === 0) return project;
+
+        const mapSuggestions = new Map<string, ConnectionSuggestion[]>();
+        for (const suggestion of projectSuggestions) {
+          const existing = mapSuggestions.get(suggestion.mapId) ?? [];
+          existing.push(suggestion);
+          mapSuggestions.set(suggestion.mapId, existing);
+        }
+
+        const nextMaps = { ...project.maps };
+        let changed = false;
+        for (const [mapId, list] of mapSuggestions.entries()) {
+          const map = nextMaps[mapId];
+          if (!map) continue;
+          const existingEdgeKeys = new Set(map.edges.map((e) => `${e.source}->${e.target}`));
+          const newEdges = [...map.edges];
+          for (const suggestion of list) {
+            const edgeKey = `${suggestion.sourceNodeId}->${suggestion.targetNodeId}`;
+            if (existingEdgeKeys.has(edgeKey)) continue;
+            existingEdgeKeys.add(edgeKey);
+            newEdges.push({
+              id: `e-${suggestion.sourceNodeId}-${suggestion.targetNodeId}-${newEdges.length + 1}`,
+              source: suggestion.sourceNodeId,
+              target: suggestion.targetNodeId,
+              type: 'smoothstep',
+              animated: true,
+              style: { stroke: '#94a3b8', strokeWidth: 2 },
+              label: 'link',
+              labelStyle: { fontSize: 11, fontWeight: 600 },
+            });
+          }
+          if (newEdges.length !== map.edges.length) {
+            changed = true;
+            nextMaps[mapId] = { ...map, edges: newEdges };
+          }
+        }
+
+        if (!changed) return project;
+        return {
+          ...project,
+          updatedAt: new Date().toISOString(),
+          maps: nextMaps,
+        };
+      });
+
+      return { projects: nextProjects };
+    });
+    get().persist();
   },
 
   finalizeProject(id) {
